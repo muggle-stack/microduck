@@ -64,18 +64,21 @@ const REPORT_LOOKS: u64 = 20;
 
 /// Which runtime is doing the work.
 ///
-/// Chosen by the model's own extension rather than by a config switch: a `.rknn` only runs on the
-/// NPU and an `.onnx` only runs on the CPU, so asking somebody to say both is asking them to
-/// contradict themselves.
+/// The extension still selects RKNN versus ONNX. Only ONNX has a provider choice;
+/// an explicitly selected SpaceMIT EP must never silently turn into CPU inference.
 enum Backend {
     Npu(duck_detect::rknn::Model),
-    Cpu(duck_detect::onnx::Model),
+    Onnx(duck_detect::onnx::Model),
 }
 
 impl Backend {
-    fn open(path: &Path) -> Result<Self> {
+    fn open(path: &Path, options: &duck_detect::onnx::Options) -> Result<Self> {
         let rknn = path.extension().is_some_and(|ext| ext == "rknn");
         if rknn {
+            anyhow::ensure!(
+                options.provider == duck_detect::onnx::Provider::Cpu,
+                "SpaceMIT EP requires an ONNX model, not RKNN"
+            );
             let model = duck_detect::rknn::Model::open(path)?;
             tracing::info!(
                 model = %path.display(),
@@ -85,26 +88,28 @@ impl Backend {
             );
             Ok(Self::Npu(model))
         } else {
-            let model = duck_detect::onnx::Model::open(path)?;
+            let model = duck_detect::onnx::Model::open_with_options(path, options)?;
             tracing::info!(
                 model = %path.display(),
-                "duck detector on the cpu — an .onnx model, or an .rknn the npu would not take"
+                provider = ?options.provider,
+                threads = options.threads,
+                "duck detector on ONNX Runtime"
             );
-            Ok(Self::Cpu(model))
+            Ok(Self::Onnx(model))
         }
     }
 
     fn input(&self) -> (usize, usize, usize) {
         match self {
             Self::Npu(model) => model.input,
-            Self::Cpu(model) => model.input,
+            Self::Onnx(model) => model.input,
         }
     }
 
     fn infer(&mut self, frame: &[u8], out: &mut Vec<f32>) -> Result<()> {
         match self {
             Self::Npu(model) => model.infer(frame, out),
-            Self::Cpu(model) => model.infer(frame, out),
+            Self::Onnx(model) => model.infer(frame, out),
         }
     }
 }
@@ -121,9 +126,44 @@ pub fn spawn_first(
     threshold: f32,
     turn: Turn,
 ) -> Result<Detector> {
+    spawn_first_with_options(
+        models,
+        frames,
+        hz,
+        threshold,
+        turn,
+        &duck_detect::onnx::Options::default(),
+    )
+}
+
+/// The daemon's configured ONNX backend. Existing callers keep the original CPU defaults.
+pub fn onnx_options(params: &robotd_params::DetectParams) -> duck_detect::onnx::Options {
+    duck_detect::onnx::Options {
+        provider: match params.onnx_provider {
+            robotd_params::DetectOnnxProvider::Cpu => duck_detect::onnx::Provider::Cpu,
+            robotd_params::DetectOnnxProvider::Spacemit => duck_detect::onnx::Provider::Spacemit,
+        },
+        threads: params.onnx_threads,
+        spacemit_affinity: match params.spacemit_affinity.as_str() {
+            "auto" => String::new(),
+            affinity => affinity.into(),
+        },
+        spacemit_allow_fp16_epilogue: params.spacemit_allow_fp16_epilogue,
+        profile: None,
+    }
+}
+
+pub fn spawn_first_with_options(
+    models: &[std::path::PathBuf],
+    frames: Frames,
+    hz: f64,
+    threshold: f32,
+    turn: Turn,
+    options: &duck_detect::onnx::Options,
+) -> Result<Detector> {
     let mut refused = Vec::new();
     for model in models {
-        match spawn(model, frames.clone(), hz, threshold, turn) {
+        match spawn_with_options(model, frames.clone(), hz, threshold, turn, options) {
             Ok(detector) => return Ok(detector),
             Err(error) => {
                 // Said at `warn` rather than swallowed: falling back to the CPU is a decision worth
@@ -152,7 +192,25 @@ pub fn spawn(
     threshold: f32,
     turn: Turn,
 ) -> Result<Detector> {
-    let mut backend = Backend::open(model)?;
+    spawn_with_options(
+        model,
+        frames,
+        hz,
+        threshold,
+        turn,
+        &duck_detect::onnx::Options::default(),
+    )
+}
+
+pub fn spawn_with_options(
+    model: &Path,
+    frames: Frames,
+    hz: f64,
+    threshold: f32,
+    turn: Turn,
+    options: &duck_detect::onnx::Options,
+) -> Result<Detector> {
+    let mut backend = Backend::open(model, options)?;
     let (height, width, channels) = backend.input();
     anyhow::ensure!(
         channels == 3 && width == height,
@@ -337,6 +395,27 @@ pub fn notification(sighting: &Sighting) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_ep_options_reach_the_detector_unchanged() {
+        let defaults = onnx_options(&robotd_params::DetectParams::default());
+        assert_eq!(defaults.provider, duck_detect::onnx::Provider::Cpu);
+        assert_eq!(defaults.threads, 2);
+        assert!(defaults.spacemit_affinity.is_empty());
+        let params = robotd_params::DetectParams {
+            onnx_provider: robotd_params::DetectOnnxProvider::Spacemit,
+            onnx_threads: 4,
+            spacemit_affinity: "0;1;2;3".into(),
+            spacemit_allow_fp16_epilogue: true,
+            ..Default::default()
+        };
+        let options = onnx_options(&params);
+        assert_eq!(options.provider, duck_detect::onnx::Provider::Spacemit);
+        assert_eq!(options.threads, 4);
+        assert_eq!(options.spacemit_affinity, "0;1;2;3");
+        assert!(options.spacemit_allow_fp16_epilogue);
+        assert!(options.profile.is_none());
+    }
 
     /// Grey stays grey, and the channels do not swap.
     ///

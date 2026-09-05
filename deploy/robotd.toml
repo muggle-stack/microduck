@@ -335,11 +335,20 @@ mode = "walk"
 # pay ~60 ms of work every half second for it.
 # enabled = true
 
-# Which model, and therefore which processor: a `.rknn` runs on the NPU, an `.onnx` on the CPU.
+# Which model: a `.rknn` runs on Rockchip's NPU, an `.onnx` uses onnx_provider (CPU by default).
 # Unset tries the release's own, NPU first — and falls through to the CPU on a board whose NPU is
 # switched off in its device tree, which is how Armbian ships the Radxa Zero 3. `sudo sh
 # /opt/robot/daemon/current/scripts/setup-npu.sh` turns it on, and needs a reboot.
 # model = "/home/microduck/my_detector.rknn"
+
+# ONNX only. Defaults keep the original CPU path; requesting SpaceMIT requires an explicit
+# compatible ONNX model and never silently falls back to CPU. On K1 use the validated opset 17
+# floating-point model; the release's original opset 12 graph is NOT supported by EP 2.0.6.
+# See docs/project/k1-duck-ort-ep.md for offline verification before enabling the daemon.
+# onnx_provider = "cpu"             # "cpu" | "spacemit"
+# onnx_threads = 2                  # ORT and EP intra-op thread counts
+# spacemit_affinity = "auto"        # optional EP CPU IDs, e.g. "0;1;2;3" for 4 threads
+# spacemit_allow_fp16_epilogue = false # precision opt-in; experimental INT8 requires true
 
 # Looks per second. **2 is a thermal limit, not a preference**: flat out this reaches 95 °C on a
 # Radxa Zero 3 and the CPU throttles to 408 MHz, which is a robot that walks badly to see well.

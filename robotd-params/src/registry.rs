@@ -298,7 +298,27 @@ pub const REGISTRY: &[Entry] = &[
     entry(
         "detect.model",
         Kind::OptionalPath,
-        "Model to run; unset = the release's, .rknn on the NPU before .onnx on the CPU",
+        "Model to run; unset = release RKNN then CPU ONNX. SpaceMIT needs an explicit ONNX",
+    ),
+    entry(
+        "detect.onnx_provider",
+        Kind::Choice(&["cpu", "spacemit"]),
+        "ONNX backend (restart mediad); SpaceMIT is opt-in, no CPU fallback",
+    ),
+    entry(
+        "detect.onnx_threads",
+        Kind::Integer,
+        "ORT and SpaceMIT EP intra-op threads, 1..256; default 2",
+    ),
+    entry(
+        "detect.spacemit_affinity",
+        Kind::Text,
+        "SpaceMIT worker CPU IDs, e.g. 0;1;2;3; auto = provider default",
+    ),
+    entry(
+        "detect.spacemit_allow_fp16_epilogue",
+        Kind::Bool,
+        "Allow lower-precision EP epilogues; experimental INT8 requires it",
     ),
     entry(
         "detect.hz",

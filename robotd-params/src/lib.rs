@@ -360,9 +360,18 @@ pub struct DetectParams {
     /// Off by default. The detector costs a model in the release, ~50 ms of CPU per frame and some
     /// heat; a robot that nothing asks to look for ducks should not be paying for it.
     pub enabled: bool,
-    /// Where to look, and therefore *what runs it*: a `.rknn` goes to the NPU, an `.onnx` runs on
-    /// the CPU. Absent means the release's own model, NPU first — see [`DetectParams::model`].
+    /// A `.rknn` uses Rockchip's NPU; an `.onnx` uses `onnx_provider` (CPU by default).
+    /// SpaceMIT requires an explicit compatible ONNX, not the release's original opset 12 graph.
     pub model: Option<PathBuf>,
+    /// ONNX only. Explicit SpaceMIT selection fails closed if the EP cannot load/run the graph.
+    pub onnx_provider: DetectOnnxProvider,
+    /// ORT intra-op threads and SpaceMIT EP's separate worker count. Default stays two.
+    pub onnx_threads: usize,
+    /// SpaceMIT worker CPU IDs separated by semicolons; "auto" leaves affinity to the provider.
+    pub spacemit_affinity: String,
+    /// Opt in to lower-precision epilogues. Needed by EP 2.0.6's experimental INT8 path; off
+    /// for the validated floating-point graph. Does not quantize or replace a model for you.
+    pub spacemit_allow_fp16_epilogue: bool,
     /// Frames per second to run the detector at.
     ///
     /// **2 Hz is a thermal number, not a taste.** Flat out on a Radxa Zero 3 this reaches 95 °C and
@@ -382,10 +391,22 @@ impl Default for DetectParams {
         Self {
             enabled: false,
             model: None,
+            onnx_provider: DetectOnnxProvider::Cpu,
+            onnx_threads: 2,
+            spacemit_affinity: "auto".into(),
+            spacemit_allow_fp16_epilogue: false,
             hz: 2.0,
             threshold: 0.35,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetectOnnxProvider {
+    #[default]
+    Cpu,
+    Spacemit,
 }
 
 impl MediaParams {
@@ -1645,6 +1666,8 @@ impl Default for UpdateGate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParamsError {
+    #[error("{path}: detect: {reason}")]
+    Detect { path: String, reason: String },
     #[error("reading {path}: {source}")]
     Read {
         path: String,
@@ -1739,6 +1762,35 @@ impl Params {
     /// Reject values that would produce a loop that cannot work, at startup rather than as
     /// a division by zero three seconds later.
     fn validate(&self, path: &Path) -> Result<(), ParamsError> {
+        let detect_error = |reason: &str| ParamsError::Detect {
+            path: path.display().to_string(),
+            reason: reason.into(),
+        };
+        if !(1..=256).contains(&self.detect.onnx_threads) {
+            return Err(detect_error("onnx_threads must be between 1 and 256"));
+        }
+        if self.detect.onnx_provider == DetectOnnxProvider::Spacemit {
+            let affinity = &self.detect.spacemit_affinity;
+            if !affinity.is_empty() && affinity != "auto" {
+                let cores: Vec<_> = affinity.split(';').collect();
+                if cores.len() != self.detect.onnx_threads
+                    || !cores.iter().all(|s| s.parse::<u32>().is_ok())
+                {
+                    return Err(detect_error(
+                        "spacemit_affinity needs one CPU ID per thread, separated by ';'",
+                    ));
+                }
+            }
+            if self.detect.enabled
+                && !self.detect.model.as_ref().is_some_and(|model| {
+                    is_none_sentinel(model) || model.extension().is_some_and(|ext| ext == "onnx")
+                })
+            {
+                return Err(detect_error(
+                    "SpaceMIT requires an explicit compatible .onnx model (opset 17); the release's original opset 12 model is unsupported",
+                ));
+            }
+        }
         if self.control.hz == 0 || self.control.hz > 1000 {
             return Err(ParamsError::Rate {
                 path: path.display().to_string(),
@@ -1833,6 +1885,30 @@ fn without_unknown_keys(text: &str) -> Option<(Result<Params, toml::de::Error>, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detector_provider_is_opt_in_and_requires_a_compatible_model_path() {
+        use super::*;
+        let mut params: Params = toml::from_str("[detect]\nenabled = true").unwrap();
+        assert_eq!(params.detect.onnx_provider, DetectOnnxProvider::Cpu);
+        assert_eq!(params.detect.onnx_threads, 2);
+        assert!(!params.detect.spacemit_allow_fp16_epilogue);
+        let path = Path::new("test.toml");
+        assert!(params.validate(path).is_ok());
+        params.detect.onnx_provider = DetectOnnxProvider::Spacemit;
+        assert!(params.validate(path).is_err());
+        params.detect.model = Some("duck.rknn".into());
+        assert!(params.validate(path).is_err());
+        params.detect.model = Some("duck.slim.onnx".into());
+        params.detect.spacemit_affinity = "0;1".into();
+        assert!(params.validate(path).is_ok());
+        params.detect.spacemit_affinity = "0;1;2".into();
+        assert!(params.validate(path).is_err());
+        params.detect.spacemit_affinity.clear();
+        params.detect.onnx_threads = 0;
+        assert!(params.validate(path).is_err());
+        assert!(toml::from_str::<Params>("[detect]\nonnx_provider = 'unknown'").is_err());
+    }
+
     /// [`Slot::as_str`] must be the *serde key*, because `robotctl policy load` writes
     /// `policy.<slot>` into `robotd.toml` with it. A display name that merely reads well —
     /// `sit_stand`, `groundPick` — would write a key `Params` then ignores as unknown, and the

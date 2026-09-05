@@ -18,6 +18,7 @@
 
 pub mod onnx;
 pub mod rknn;
+mod spacemit;
 
 /// What the head emits per candidate: cx, cy, w, h, score.
 const STRIDE: usize = 5;

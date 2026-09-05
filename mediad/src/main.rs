@@ -297,12 +297,13 @@ fn main() -> ExitCode {
             } else {
                 turn
             };
-            match mediad::detect::spawn_first(
+            match mediad::detect::spawn_first_with_options(
                 &models,
                 frames.clone(),
                 detect.hz,
                 detect.threshold,
                 sampler_turn,
+                &mediad::detect::onnx_options(&detect),
             ) {
                 Ok(detector) => Some(detector),
                 Err(error) => {
