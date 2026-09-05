@@ -308,7 +308,9 @@ microphone monitoring off, and no systemd service was started or enabled.
 - Real Dynamixel half-duplex UART, 15 servos and IMU feedback.
 - CSI camera/sensor/ISP configuration and exposure control.
 - K1 H.264 encoder selection and the missing `webrtcsink` runtime plugin.
-- Selecting/quantising an appropriate detector and integrating the SpaceMIT execution provider.
+- SDK integration of the SpaceMIT vision execution provider and labelled detector validation.
+  The [standalone XSlim/EP experiment](k1-duck-quantization.md) runs at about 21.6 ms on
+  four K1 cores, but its INT8 output is not accuracy-qualified and is not the SDK default.
 - Real ToF, Bluetooth controller and gamepad bring-up; ES8326 audio is covered above,
   but microphone/enclosure-specific petting accuracy is not.
 - RISC-V provisioning, signed release packaging, OTA assets and CI. The inherited release
