@@ -12,6 +12,10 @@ the two are not quite the same checkout — see below.
 cargo test --workspace
 ```
 
+For native RISC-V builds and regression on SpaceMIT K1, see
+[the K1 bring-up notes](docs/project/spacemit-k1.md). `cargo k1` targets the K1;
+`cargo board` continues to target the shipped Radxa board.
+
 No hardware, no network, no Docker. If they pass, your checkout is sound.
 
 **On Linux** that command needs some C libraries first, the same ones CI installs: `padd` binds

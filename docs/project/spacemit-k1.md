@@ -1,0 +1,197 @@
+# SpaceMIT K1: native SDK regression
+
+Development branch: [muggle-stack/microduck:spacemit-k1](https://github.com/muggle-stack/microduck/tree/spacemit-k1).
+Based on upstream `bc41fb5` (2026-09-05 checkout). This is a native-build and software-regression
+path, not a claim that the Radxa HAT, camera, radio, or installation image is interchangeable.
+
+## Build on the K1
+
+The Rust target is **`riscv64gc-unknown-linux-gnu`**. Bianbu reports `riscv64` from `uname -m`;
+that shorter string is not the Rust target triple. The board's own C compiler and installed
+GStreamer development files provide the native sysroot.
+
+```sh
+cd /root/workspace/microduck
+export PATH=/opt/microduck-rust-1.89.0/bin:$PATH
+cargo k1 --locked --bins -j 2
+```
+
+The isolated Rust installation does not replace `/usr/bin/rustc` or the apt packages.
+`cargo board` still cross-compiles for aarch64. `cargo k1` is a **native K1** command; running it
+on a Mac does not supply a RISC-V Linux linker or the board's GStreamer libraries.
+
+A cold full-workspace release/test build on the K1 takes over an hour. For quick feedback
+during an edit, check or test only the affected crate without release optimisation:
+
+```sh
+cargo check --locked --target riscv64gc-unknown-linux-gnu -p duck-control
+cargo test --locked --target riscv64gc-unknown-linux-gnu -p duck-control
+```
+
+Linux build dependencies are `libudev-dev`, `libgstreamer1.0-dev`,
+`libgstreamer-plugins-base1.0-dev`, and `libgstreamer-plugins-bad1.0-dev`.
+Check an apt dry run before installing: the default candidates on the tested Bianbu 2.1.1
+image would also upgrade its multimedia and Wayland runtime. Matching development packages
+were used instead, leaving every existing runtime package at its installed version:
+
+| Development package | Version used |
+| --- | --- |
+| libudev-dev | 255.4-1ubuntu8bb2 |
+| libgstreamer1.0-dev | 1.24.2-1bb3 |
+| libgstreamer-plugins-base1.0-dev | 1.24.2-1ubuntu0.1bb2 |
+| libgstreamer-plugins-bad1.0-dev | 1.24.2-1ubuntu4bb10 |
+| libwayland-dev / libwayland-bin | 1.22.0-2.1build1 |
+
+The matching `libgstreamer-plugins-bad1.0-dev` and `libgstreamer-opencv1.0-0` packages remain
+in the official Bianbu archive's `pool/universe/g/gst-plugins-bad1.0/`, even though apt's current
+index only advertises the newer `bb18` vendor revision. Installing the matching dependencies
+added 17 packages, upgraded none, and removed none.
+
+## Repeat the software checks
+
+```sh
+sh scripts/k1-test.sh
+```
+
+This runs the workspace's release-mode tests on the RISC-V target, builds the board binaries,
+and runs the seven daemons plus `robotctl` with `--help` to check their executable loading.
+The existing robotd integration tests use `--fake`, exercising IPC and the update health gate
+without a motor bus. The script does not install systemd services, run provisioning scripts,
+change networking, or enable motors.
+
+The build and test concurrency default to two to bound memory use and scheduling contention
+on the 4 GB board. Override with `K1_BUILD_JOBS` and `K1_TEST_THREADS`. If dependencies have
+already been fetched, `CARGO_NET_OFFLINE=true` also works; the crate sources/cache can be copied
+from a development machine, but compilation and execution still happen on the K1.
+
+### Runtime-present test fixes
+
+The first K1 run recorded **1,245 passed, two failed, six ignored**. Both failures were test
+fixtures exposed by the installed ONNX Runtime, not RISC-V compilation failures:
+
+- `setting_a_skill_keeps_what_the_call_left_out` used a text file as its ONNX model. That
+  reaches the intended merge logic when the runtime is absent, but real model validation
+  correctly rejects it when the runtime is installed. It now uses a tiny valid Gather graph.
+- `an_unloadable_policy_holds_the_pose_and_reports_why` used a nonexistent override. Startup
+  validation discards that override and loads the board's default instead, so the result
+  depended on installed policy files. It now uses a shape-valid graph that fails at warm-up
+  inference, exercising the failure/hold/health contract regardless of installed defaults.
+
+Both fixtures are embedded protobuf bytes; they need no download or Python dependency. The
+production validation, override fallback and failure-handling logic are unchanged. The original
+negative result remains in `target/k1-regression.log`; the rerun uses
+`target/k1-regression-fixed.log` rather than overwriting it.
+
+After the fixes, all 52 suites passed: **1,247 tests passed, zero failed, six ignored** on
+K1 / Rust 1.89 in release mode. The corresponding macOS / Rust 1.93 host run passed
+**1,215 tests, zero failed, six ignored**. The different totals include Linux-only code and
+tests; the host result alone does not validate the Linux daemons. The six ignored tests are
+the existing two kinematics timing probes and four robotctl timing/visual probes, not newly
+excluded failures.
+
+The host's Rust 1.93 Clippy also found a duplicated `#[cfg(test)]` on the chorale tests in the
+upstream checkout. Removing the redundant attribute makes `robotd --tests` pass Clippy with
+`-D warnings`; it changes neither the production binary nor which tests are enabled.
+
+The separate production `cargo k1 --locked --bins -j 4` build also passed, as did all eight
+executable-loader checks. Its first build of the non-test dependency feature set took
+30m26s; the earlier full test build reported 88m00s. The final cached regression's build phases
+took 2.99s (tests) and 2.59s (production binaries); test execution is additional to those
+build times. The complete revised script, including policy inference below, exited zero.
+
+## Validate real policy inference
+
+The latest upstream checkout downloads its policies from
+[`pollen-robotics/microduck-policies`](https://huggingface.co/pollen-robotics/microduck-policies),
+rather than carrying them in Git. `scripts/seed-policies.sh` can populate a separate test root;
+pass that root explicitly to avoid touching an installed robot's policy set.
+
+On this network, the K1's Hub TLS connection timed out, and the seeding script's eight-second
+per-file deadline also expired for one download on the Mac. The nine v1 files were downloaded
+on the Mac with a longer deadline and copied to `target/k1-policy-files/` on the K1. All nine
+were byte-identical (`cmp` exit 0) to the policies in the previous `2c61dcc` checkout. The
+seeding script's production update-hook timeout was not changed.
+
+```sh
+sh scripts/k1-test.sh target/k1-policy-files 200
+# Or only the model check, after building:
+target/riscv64gc-unknown-linux-gnu/release/examples/policy-bench target/k1-policy-files 200
+```
+
+The regression script reuses the example built by `cargo test --workspace`. Running
+`cargo run -p duck-control --example policy-bench` separately selects a narrower dependency
+feature set and triggers another native build; no extra build is needed after the regression.
+For a fresh checkout where only this example is wanted, build it with
+`cargo k1 --locked -p duck-control --example policy-bench -j 2` first.
+
+`policy-bench` uses the SDK's `Policy::load` and `Policy::infer`, including its shape validation
+and single-threaded CPU session configuration. Each model receives a fixed upright home-pose
+observation. It checks that actions are finite, warms up 20 times after loading, then reports
+mean/P50/P95/P99/max over the requested iteration count. It never opens a serial port or writes
+actions to hardware. Timings exclude model loading and do not measure gait quality, UART
+latency, or the complete 50 Hz control loop.
+
+This is a runtime measurement, not a claimed speedup. No model quantisation or weight changes
+were made. Finite actions are checked; output bit-equivalence with Radxa or a previous runtime
+has not been tested.
+
+### K1 results, 2026-09-05
+
+Bianbu 2.1.1, 4 GB board, eight CPUs available, performance governor at 1.6 GHz, no CPU
+affinity pinning. The SDK uses CPU execution with one intra-op thread; no SpaceMIT EP was
+added. Its loaded library was `/usr/lib/libonnxruntime.so.1.24.2+spacemit.a1`, not the
+separate Python runtime. Compiler processes had exited before measuring. Each row is one
+model loaded independently, with 20 warm-ups and 200 measured inferences; units are ms.
+
+| Model | Mean | P95 | P99 | Max |
+| --- | ---: | ---: | ---: | ---: |
+| alpha_ground_pick | 0.9323 | 1.0288 | 1.0890 | 1.1042 |
+| alpha_sitstand | 0.9355 | 1.0345 | 1.1022 | 3.2334 |
+| alpha_stand | 0.8817 | 0.9637 | 0.9888 | 1.1972 |
+| alpha_walking | 0.9055 | 0.9781 | 0.9912 | 0.9916 |
+| ball_kick_left | 0.8965 | 0.9765 | 0.9937 | 0.9962 |
+| ball_kick_right | 0.9033 | 0.9758 | 0.9876 | 0.9942 |
+| roller | 0.8889 | 0.9660 | 0.9792 | 0.9838 |
+| roller_crouch | 0.8991 | 0.9758 | 0.9883 | 1.0583 |
+| roulade | 0.8764 | 0.9564 | 0.9668 | 0.9690 |
+
+All actions were finite. The 3.2334 ms sit/stand outlier is retained, not discarded. Even
+that sample is below a 20 ms tick, but this benchmark excludes real bus and peripheral work.
+The complete CSV, including P50, is at the end of `target/k1-regression-fixed.log`.
+
+## Native startup check
+
+The generated `robotd` was identified as an ELF64 RISC-V executable with the LP64D ABI and
+ran `--version` on the K1, reporting `0.10.0`. A separate `robotd --fake` process then loaded
+all seven walking-mode policy slots through the real ONNX Runtime and answered `robot.health`
+with `healthy: true`; `robot.policies` reported no slot errors.
+
+That functional check used an isolated socket/runtime directory, disabled audio and theremin,
+and set the serial path to a deliberately nonexistent device in addition to `--fake`.
+It ran while compilation was still active and was stopped cleanly afterward. It proves native
+startup, policy loading and IPC, **not** sustained loop timing or operation with real motors.
+The throwaway fixture and log are `target/k1-fake.toml` and `target/k1-fake.log` on the K1.
+
+After the full regression, a second isolated `--fake` process was enabled through IPC and
+given `vx = 0.2 m/s` commands approximately every 20 ms. After a three-second enable warm-up,
+the 30.008-second measurement completed **1,500 ticks (49.986 Hz), zero missed deadlines**.
+Five health samples reported 49.978–50.041 Hz; every sample and the final verdict were healthy.
+The final `robot.state` frame reported `policy: "walk"`, the requested forward command was
+applied, and all joint/target values were finite. `/proc/<pid>/maps` confirmed the runtime
+library named above. The process was then disabled and stopped cleanly.
+
+This remains **fake IO on a real K1**, not a servo-bus, IMU, or gait-quality test. No media
+or other compute workload ran concurrently. The process log is `target/k1-loop.log` and its
+captured IPC output is `target/k1-loop-result.log`; the fixture and logs are ignored artifacts,
+not installed robot configuration or committed models.
+
+## Outside this software check
+
+- Real Dynamixel half-duplex UART, 15 servos and IMU feedback.
+- CSI camera/sensor/ISP configuration and exposure control.
+- K1 H.264 encoder selection and the missing `webrtcsink` runtime plugin.
+- Selecting/quantising an appropriate detector and integrating the SpaceMIT execution provider.
+- Real ToF, microphone/speaker, Bluetooth controller and gamepad bring-up.
+- RISC-V provisioning, signed release packaging, OTA assets and CI. The inherited release
+  workflows and setup scripts still describe the Radxa/aarch64 platform; do not install their
+  artifacts on a K1 simply because the branch is named `spacemit-k1`.

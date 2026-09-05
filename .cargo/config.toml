@@ -22,3 +22,6 @@
 [alias]
 # Release build for the board. Add `--bins`, `-p updater`, etc.
 board = "zigbuild --release --target aarch64-unknown-linux-gnu.2.31"
+# Native build on SpaceMIT K1/Bianbu. Uses the board's own compiler and GStreamer;
+# this is not a cross-build alias for a Mac or an x86 Linux host.
+k1 = "build --release --target riscv64gc-unknown-linux-gnu"
