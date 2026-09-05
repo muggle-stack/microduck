@@ -196,6 +196,14 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
     sorted[index]
 }
 
+fn reporting_hz(configured: f64, frames: usize, wall: Duration) -> f64 {
+    if configured > 0.0 {
+        configured
+    } else {
+        frames as f64 / wall.as_secs_f64()
+    }
+}
+
 fn jpegs(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(directory)
         .with_context(|| format!("cannot read {}", directory.display()))?
@@ -389,23 +397,15 @@ fn main() -> Result<()> {
     // The number that decides whether this can run beside the control loop: one core fully busy is
     // 100%, and the NPU doing the work should leave this well under it.
     let cpu_per_frame = 1e3 * cpu / latencies.len() as f64;
+    let report_hz = reporting_hz(args.hz, latencies.len(), wall);
     println!(
         "cpu        {:.1} ms per frame — {:.0}% of one core at {:.1} Hz",
         cpu_per_frame,
         // What it would cost at the paced rate, which is the number that matters beside a 50 Hz
         // control loop. Flat out it is whatever the loop can push, and that is a different
         // question.
-        0.1 * cpu_per_frame
-            * if args.hz > 0.0 {
-                args.hz
-            } else {
-                1000.0 / cpu_per_frame
-            },
-        if args.hz > 0.0 {
-            args.hz
-        } else {
-            1000.0 / cpu_per_frame
-        }
+        0.1 * cpu_per_frame * report_hz,
+        report_hz,
     );
     if let Some(temperature) = soc_temperature() {
         println!("soc temp   {temperature:.0} °C at the end of the run");
@@ -457,4 +457,17 @@ fn main() -> Result<()> {
         println!("profile {}", profiled.end_profiling()?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_out_cpu_usage_uses_wall_throughput_not_cpu_time() {
+        let hz = reporting_hz(0.0, 60, Duration::from_secs(15));
+        assert_eq!(hz, 4.0);
+        assert_eq!(0.1 * 500.0 * hz, 200.0); // 500 CPU-ms/frame at 4 fps = two busy cores.
+        assert_eq!(reporting_hz(2.0, 60, Duration::from_secs(15)), 2.0);
+    }
 }
