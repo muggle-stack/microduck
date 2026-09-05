@@ -185,13 +185,132 @@ or other compute workload ran concurrently. The process log is `target/k1-loop.l
 captured IPC output is `target/k1-loop-result.log`; the fixture and logs are ignored artifacts,
 not installed robot configuration or committed models.
 
+## ES8326 audio
+
+The K1's existing ES8326 driver and mixer are used as-is. The user confirmed real
+48 kHz / S16_LE / stereo recording and playback with `hw:1,0`. The SDK profile uses
+the stable ALSA card ID **`sndes8326`**, not a card number that can change after boot.
+This is an opt-in board profile; the original Radxa/AIC3104 default is unchanged.
+
+```sh
+# K1, as root. No apt install, kernel/DT change, mixer write or service restart.
+sh scripts/setup-k1-audio.sh
+```
+
+This installs `deploy/audio/es8326.conf` as
+`/etc/alsa/conf.d/99-microduck-es8326.conf`, without changing `pcm.default`, PipeWire,
+`/etc/asound.conf` or the user's `.asoundrc`. On a board without a robot config it also
+creates `/etc/robot/robotd.toml` from `deploy/k1/robotd-audio.toml`. An existing robot
+config is **never overwritten**: merge this into its existing `[audio]` section:
+
+```toml
+[audio]
+enabled = true
+device = "microduck_es8326"
+```
+
+This is only an audio profile, not K1 UART/HAT provisioning. Do **not** run the
+Radxa `setup-board.sh` audio section: its AIC3X DKMS driver, Rockchip kernel and
+device-tree overlays are unrelated to the K1's already-working codec. The setup
+helper preserves a locally modified ES8326 profile too, and asks for a manual merge.
+It does not generate a voice bank or turn on microphone monitoring. A provisioned
+SDK uses `sounds ensure-bank`; a development bank can live anywhere selected by
+`audio.bank`. `audio.pet_detect = true` and a valid `audio.pet_model` explicitly
+enable the existing microphone worker; its default remains off.
+
+### Why a PCM profile is needed
+
+The SDK plays 48 kHz mono S16_LE and captures 16 kHz mono S16_LE. Direct `plughw`
+calls work separately but **fail in either full-duplex startup order** on this
+board: the second stream cannot install its different hardware rate. Fixing both
+hardware streams at 48 kHz stereo avoids that clock conflict. ALSA's
+[`plug` conversion and `mmap_emul` plugins](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html)
+provide the SDK formats without changing its DSP, models or subprocess commands.
+
+The explicit `mmap_emul` layer matters: this Bianbu PCM advertises only
+`RW_INTERLEAVED`, and a bare `plug` with fixed rate/channels also failed hw_params.
+The tested hardware uses a 1,024-frame period and 4,096-frame buffer at 48 kHz
+(21.33 / 85.33 ms), including when the live synth requests 10 / 40 ms. Those are
+ALSA buffer settings, **not measured end-to-end audio latency**.
+
+Mono playback is duplicated to the two outputs. Stereo capture is averaged and
+resampled to the model's 16 kHz mono input; it is not bit-identical to a raw stereo
+capture. No model weights, quantisation or detection thresholds were changed.
+Petting accuracy on a different microphone/enclosure still needs acoustic testing.
+
+`AudioParams::capture_device()` now preserves named PCMs verbatim instead of
+turning `microduck_es8326` into the invalid name `microduck_es8326,0`. Existing
+`plughw:aic3104` and explicit `hw`/`plughw` device-0 specifications retain their
+previous behaviour. The standalone `sounds` CLI already supports
+`--device microduck_es8326`; its Radxa default is intentionally not changed.
+
+### Repeat the hardware format check
+
+```sh
+# Opens the real mic for two six-second captures; audio is discarded on exit.
+# Playback is silence. Refuses a busy card; all children have bounded timeouts.
+sh scripts/k1-audio-test.sh
+```
+
+Both capture-first and playback-first passed on the K1 with the SDK's requested
+formats, 96,000 mono samples per capture, both hardware streams at 48 kHz stereo,
+and no ALSA errors or xruns. A separate six-second capture took 6.37 s wall time
+including process/device startup. These checks also ran while the two-job native
+Rust build was active; this is a functional check, not a CPU or latency benchmark.
+`scripts/k1-test.sh` stays software-only and does not implicitly open the microphone.
+
+The initial failed `plug` attempt and the passing explicit-emulation run are kept
+in `target/k1-es8326-duplex.log` and `target/k1-es8326-duplex-mmap-emul.log` on the
+development host. No recorded microphone audio is retained by the test script.
+
+### SDK integration and regression results
+
+The rebuilt native `robotd` ran with `--fake --no-policy`, an isolated IPC/runtime
+directory, the ES8326 PCM, the real `pet-detect/models/pet_detect.onnx`, and a
+generated test voice bank. `robotctl quack` played through the **SDK's own** sound
+path while its microphone worker continued recording. `/proc/asound` and both
+children's command lines confirmed that capture and playback used the named PCM;
+the microphone PID was unchanged and its hardware pointer advanced throughout.
+The final health sample was healthy, 50.012 Hz, zero missed ticks. This is a short
+fake-IO integration check with policies disabled, not a walking/load benchmark.
+Stopping only `robotd` released both PCM streams within the bounded cleanup wait,
+without a microphone restart. A first harness attempt sent SIGINT to the entire
+timeout process group (including `arecord`) and checked closure instantaneously;
+that produced a transient restart/SETUP state on exit, so it is not used as the
+clean-shutdown result. Both attempts' logs are retained.
+
+A separate five-second live capture fed the SDK's standalone `pet-detect` and
+produced inference results; it is not a petting-accuracy test. A three-second mono
+level check produced 48,000 samples, 43,819 nonzero samples, peak 156 and RMS 5.381
+in signed-16-bit units, with no clipped samples. These are that room's observed
+levels, not prescribed microphone gain settings.
+
+After this change, native K1 / Rust 1.89 release tests passed **1,249 tests, zero
+failed, six existing ignored**; macOS / Rust 1.93 passed **1,217, zero failed, six
+ignored**. The K1 incremental release compilation took 20m08s. Formatting,
+ShellCheck, and host Clippy for the changed parameter crate and `robotd` passed.
+A wider Clippy probe still found an unchanged upstream `nonminimal_bool` warning
+in `robotctl/src/monitor.rs:2188` under Rust 1.93; this audio change leaves that
+unrelated code alone.
+
+Logs: `target/k1-es8326-tests.log`, `target/k1-es8326-pet-detect.log`, and
+`target/k1-es8326-sdk-recheck.log` on the development host; the SDK process log is
+`target/k1-es8326-robotd-recheck.log` on the K1. The test bank/config live under
+`target/k1-es8326-*`, not in the repository's tracked files.
+
+After regression, the board's previously absent default voice bank was populated
+with `sounds ensure-bank` (82 sounds under `/var/lib/robot/sounds`, seeded from
+this board's hardware identity). The installed audio-only config still leaves
+microphone monitoring off, and no systemd service was started or enabled.
+
 ## Outside this software check
 
 - Real Dynamixel half-duplex UART, 15 servos and IMU feedback.
 - CSI camera/sensor/ISP configuration and exposure control.
 - K1 H.264 encoder selection and the missing `webrtcsink` runtime plugin.
 - Selecting/quantising an appropriate detector and integrating the SpaceMIT execution provider.
-- Real ToF, microphone/speaker, Bluetooth controller and gamepad bring-up.
+- Real ToF, Bluetooth controller and gamepad bring-up; ES8326 audio is covered above,
+  but microphone/enclosure-specific petting accuracy is not.
 - RISC-V provisioning, signed release packaging, OTA assets and CI. The inherited release
   workflows and setup scripts still describe the Radxa/aarch64 platform; do not install their
   artifacts on a K1 simply because the branch is named `spacemit-k1`.

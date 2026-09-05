@@ -510,7 +510,8 @@ impl ThereminParams {
 pub struct AudioParams {
     /// Master switch: no sounds, no mic worker.
     pub enabled: bool,
-    /// ALSA playback device — the TLV320AIC3104 codec.
+    /// ALSA playback/capture PCM. Defaults to the Radxa's TLV320AIC3104;
+    /// a board profile can name a PCM that also handles rate/channel conversion.
     pub device: String,
     /// Where the per-robot voice bank lives. The release's postinstall renders it there
     /// (`sounds ensure-bank`), seeded from the SoC serial.
@@ -556,16 +557,16 @@ impl AudioParams {
         self.pet_detect.unwrap_or(false)
     }
 
-    /// The capture PCM for the mic worker: the playback device with subdevice 0. Only
-    /// appended when the operator has not already spelled a subdevice out — `plughw:aic3104`
-    /// in `robotd.toml` is the default and needs it, but the equally natural full spec
-    /// `plughw:aic3104,0` would otherwise become `plughw:aic3104,0,0`, which no card
-    /// answers to. That lands the worker in its restart loop for the life of the daemon.
+    /// Share the playback PCM with the mic worker. Keep the historical device-0
+    /// shorthand for hw/plughw cards, but leave named PCMs alone: appending `,0` to
+    /// `microduck_es8326`, `default`, or `null` changes the name into an invalid PCM.
     pub fn capture_device(&self) -> String {
-        if self.device.contains(',') {
-            self.device.clone()
-        } else {
+        if (self.device.starts_with("hw:") || self.device.starts_with("plughw:"))
+            && !self.device.contains(',')
+        {
             format!("{},0", self.device)
+        } else {
+            self.device.clone()
         }
     }
 
@@ -2572,6 +2573,41 @@ mod tests {
             ..AudioParams::default()
         };
         assert_eq!(spelled_out.capture_device(), "plughw:aic3104,0");
+    }
+
+    #[test]
+    fn named_audio_pcms_are_passed_to_capture_unchanged() {
+        for device in [
+            "microduck_es8326",
+            "default",
+            "null",
+            "sysdefault:CARD=sndes8326",
+            "plughw:CARD=sndes8326,DEV=0",
+            "hw:1,0",
+        ] {
+            let audio = AudioParams {
+                device: device.to_owned(),
+                ..AudioParams::default()
+            };
+            assert_eq!(audio.capture_device(), device);
+        }
+        assert_eq!(AudioParams::default().device, "plughw:aic3104");
+        assert_eq!(AudioParams::default().capture_device(), "plughw:aic3104,0");
+    }
+
+    #[test]
+    fn the_k1_audio_profile_selects_the_same_pcm_for_both_directions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(
+            dir.path(),
+            include_str!("../../deploy/k1/robotd-audio.toml"),
+        );
+        let params = Params::load(&path, true).unwrap();
+        assert!(params.audio.enabled);
+        assert_eq!(params.audio.device, "microduck_es8326");
+        assert_eq!(params.audio.capture_device(), "microduck_es8326");
+        // Selecting a codec must not opt the operator into microphone monitoring.
+        assert!(!params.audio.pet_detect_resolved(params.policy.mode));
     }
 
     /// An unprovisioned board must still come up. A daemon that refuses to start because a

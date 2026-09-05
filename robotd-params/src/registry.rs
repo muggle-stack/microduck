@@ -354,7 +354,7 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Bool,
         "The voice and the microphone; off walks identically and stays quiet",
     ),
-    entry("audio.device", Kind::Text, "ALSA playback device"),
+    entry("audio.device", Kind::Text, "ALSA playback/capture PCM"),
     entry("audio.bank", Kind::Text, "Voice bank directory"),
     feature(
         "audio.greet",

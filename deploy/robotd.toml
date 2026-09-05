@@ -263,8 +263,9 @@ mode = "walk"
 # stays quiet, and nothing here reaches a health verdict.
 # enabled = true
 
-# ALSA playback device — the TLV320AIC3104 codec that setup-board.sh brings up. The mic
-# worker captures from "<device>,0".
+# ALSA playback/capture PCM — the TLV320AIC3104 codec that setup-board.sh brings up.
+# hw/plughw card-only names capture from device 0; named PCMs are used unchanged.
+# K1/ES8326: run scripts/setup-k1-audio.sh and select "microduck_es8326" instead.
 # device = "plughw:aic3104"
 
 # Where the voice bank lives.
