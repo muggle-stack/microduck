@@ -65,7 +65,8 @@ const REPORT_LOOKS: u64 = 20;
 /// Which runtime is doing the work.
 ///
 /// The extension still selects RKNN versus ONNX. Only ONNX has a provider choice;
-/// an explicitly selected SpaceMIT EP must never silently turn into CPU inference.
+/// EP load errors are not retried on CPU. The native provider may assign individual nodes to
+/// CPU; duck-bench profiling is the acceptance check for a particular model/runtime pair.
 enum Backend {
     Npu(duck_detect::rknn::Model),
     Onnx(duck_detect::onnx::Model),

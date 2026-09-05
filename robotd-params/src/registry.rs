@@ -303,7 +303,7 @@ pub const REGISTRY: &[Entry] = &[
     entry(
         "detect.onnx_provider",
         Kind::Choice(&["cpu", "spacemit"]),
-        "ONNX backend (restart mediad); SpaceMIT is opt-in, no CPU fallback",
+        "ONNX backend (restart mediad); SpaceMIT load failures are not retried on CPU",
     ),
     entry(
         "detect.onnx_threads",

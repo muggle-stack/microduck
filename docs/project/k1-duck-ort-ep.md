@@ -23,8 +23,14 @@ under Python's site-packages. Neither apt Rust nor the Rust `ort` crate version 
 `duck-detect/src/spacemit.rs` dynamically loads `OrtSessionOptionsSpaceMITEnvInit`, using the
 ABI in the board's `spacemit_ort_env_c_api.h`. Registration happens on this detector's session
 options only; robotd's policy sessions are unaffected. The library remains loaded until after
-the session drops. Native `OrtStatus` errors propagate, and CPU EP fallback is disabled when
-SpaceMIT is explicitly selected. Actual provider execution must still be checked in a profile.
+the session drops. Native `OrtStatus` errors propagate; registration/session-load failures are
+not retried with CPU-only settings. Actual provider execution must be checked in a profile.
+
+EP 2.0.6's initializer explicitly adds CPU EP alongside SpaceMIT. Setting ORT's
+`session.disable_cpu_ep_fallback=1` conflicts with that and was rejected on the board, so the
+adapter **does not set it**. Native per-node CPU fallback remains possible (including an entirely
+CPU-assigned graph); a registration log alone is not an acceleration claim. Validate every new
+model/runtime pair with `duck-bench --profile-prefix`. The daemon logs this fallback policy.
 
 The EP also needs ORT's **C++ symbols in the global loader scope**. The initial board probe
 failed with `undefined symbol: _ZTIN11onnxruntime18IExecutionProviderE`: EP 2.0.6 does not declare

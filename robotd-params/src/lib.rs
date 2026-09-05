@@ -363,7 +363,7 @@ pub struct DetectParams {
     /// A `.rknn` uses Rockchip's NPU; an `.onnx` uses `onnx_provider` (CPU by default).
     /// SpaceMIT requires an explicit compatible ONNX, not the release's original opset 12 graph.
     pub model: Option<PathBuf>,
-    /// ONNX only. Explicit SpaceMIT selection fails closed if the EP cannot load/run the graph.
+    /// ONNX only. EP load errors are not retried on CPU; profile native per-node assignment.
     pub onnx_provider: DetectOnnxProvider,
     /// ORT intra-op threads and SpaceMIT EP's separate worker count. Default stays two.
     pub onnx_threads: usize,

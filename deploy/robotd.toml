@@ -342,7 +342,8 @@ mode = "walk"
 # model = "/home/microduck/my_detector.rknn"
 
 # ONNX only. Defaults keep the original CPU path; requesting SpaceMIT requires an explicit
-# compatible ONNX model and never silently falls back to CPU. On K1 use the validated opset 17
+# compatible ONNX model. EP load failures are not retried on CPU; profile native per-node
+# fallback before deployment. On K1 use the validated opset 17
 # floating-point model; the release's original opset 12 graph is NOT supported by EP 2.0.6.
 # See docs/project/k1-duck-ort-ep.md for offline verification before enabling the daemon.
 # onnx_provider = "cpu"             # "cpu" | "spacemit"

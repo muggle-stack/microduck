@@ -115,9 +115,12 @@ impl Model {
             .with_inter_threads(1)?;
         if let Some(library) = &ep_library {
             library.register(&mut builder, options)?;
-            // A requested EP must not become a successful-looking CPU fallback. Operators
-            // should use duck-bench --profile-prefix to verify actual EP node execution.
-            builder = builder.with_config_entry("session.disable_cpu_ep_fallback", "1")?;
+            // The vendor initializer explicitly adds CPU EP too. ORT rejects combining that
+            // with session.disable_cpu_ep_fallback=1. Never retry registration/load failures
+            // on CPU; verify native per-node assignment with duck-bench --profile-prefix.
+            tracing::info!(
+                "vendor CPU node fallback is available; verify SpaceMIT coverage with an ORT profile"
+            );
         }
         if let Some(prefix) = &options.profile {
             builder = builder.with_profiling(prefix)?;

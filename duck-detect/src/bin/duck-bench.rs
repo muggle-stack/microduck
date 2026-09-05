@@ -34,7 +34,7 @@ struct Args {
     #[arg(long)]
     model: PathBuf,
 
-    /// ONNX only. SpaceMIT is explicit and does not fall back to CPU.
+    /// ONNX only. EP load failures are errors; use profiling to check native CPU node fallback.
     #[arg(long, value_enum, default_value_t = onnx::Provider::Cpu)]
     onnx_provider: onnx::Provider,
 
