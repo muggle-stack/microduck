@@ -303,14 +303,30 @@ with `sounds ensure-bank` (82 sounds under `/var/lib/robot/sounds`, seeded from
 this board's hardware identity). The installed audio-only config still leaves
 microphone monitoring off, and no systemd service was started or enabled.
 
+## Rust ORT + SpaceMIT vision backend
+
+The opt-in EP backend is now wired through `duck-detect`, `[detect]` and `robotctl configure`
+into mediad. CPU/two-thread and RKNN defaults are preserved. Use the compatible opset 17 float
+model, not the original opset 12 ONNX or a generic COCO model. No Python worker is required.
+
+The [SDK integration report](k1-duck-ort-ep.md) records native Rust measurements and exactness:
+with hard cgroup CPU budgets, RGB preprocessing + inference + NMS averages **243.0 ms on two
+CPUs** and **121.3 ms on four CPUs** for the floating-point EP model. The experimental INT8
+path averages **33.9 ms on four CPUs**, but its output is not accuracy-qualified. All successful
+EP profiles executed the SpaceMIT fused node with no CPU-provider compute nodes.
+
+This runtime needs both EP worker CPUs (0-3) and a caller CPU from 4-7. A four-CPU budget was
+tested as three workers on 0-2 plus caller CPU 4; `taskset` alone does not enforce the total
+budget because the EP rebinds its caller. The integration report includes reproducible cpuset
+commands, the failed probes, and correction of the earlier standalone experiment's core labels.
+
 ## Outside this software check
 
 - Real Dynamixel half-duplex UART, 15 servos and IMU feedback.
 - CSI camera/sensor/ISP configuration and exposure control.
 - K1 H.264 encoder selection and the missing `webrtcsink` runtime plugin.
-- SDK integration of the SpaceMIT vision execution provider and labelled detector validation.
-  The [standalone XSlim/EP experiment](k1-duck-quantization.md) runs at about 21.6 ms on
-  four K1 cores, but its INT8 output is not accuracy-qualified and is not the SDK default.
+- Labelled detector validation, live camera frames and simultaneous vision/control/media load.
+  The Rust EP backend is integrated and offline-tested; INT8 is not the SDK default.
 - Real ToF, Bluetooth controller and gamepad bring-up; ES8326 audio is covered above,
   but microphone/enclosure-specific petting accuracy is not.
 - RISC-V provisioning, signed release packaging, OTA assets and CI. The inherited release
