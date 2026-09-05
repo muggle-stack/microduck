@@ -26,6 +26,13 @@ options only; robotd's policy sessions are unaffected. The library remains loade
 the session drops. Native `OrtStatus` errors propagate, and CPU EP fallback is disabled when
 SpaceMIT is explicitly selected. Actual provider execution must still be checked in a profile.
 
+The EP also needs ORT's **C++ symbols in the global loader scope**. The initial board probe
+failed with `undefined symbol: _ZTIN11onnxruntime18IExecutionProviderE`: EP 2.0.6 does not declare
+`libonnxruntime` in its `DT_NEEDED` list, and Rust `ort` loads libraries with `RTLD_LOCAL`.
+The adapter verifies the ORT API pointer identity, then promotes that same native ORT mapping
+with `RTLD_NOW | RTLD_GLOBAL` before opening the EP. This matches the symbol visibility of the
+working C++ executable without introducing a link-time dependency or mixing Python's runtime.
+
 ## Offline verification before enabling mediad
 
 Build natively, using the independent Rust 1.89 installation:
