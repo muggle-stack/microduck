@@ -5,6 +5,11 @@ and detector consumers. It does not port IMX219/ISP or complete H.264/WebRTC.
 The Radxa source and portable USB software path remain the defaults. No model,
 quantisation, threshold, EP options or detector preprocessing is changed.
 
+The requested use is **one selected eye from the camera**, even when its native USB frame
+contains two eyes. Dual-eye measurements below are retained as extra diagnostics, not a
+remaining acceptance requirement. For toolchain setup and a relocatable development install,
+start with [the K1 installation guide](../robot/install-k1.md).
+
 ## What runs where
 
 ```text
@@ -230,8 +235,8 @@ Both-eye inference (5 warm-up + 20 measured pairs, two serial inferences per pai
 requested 2 Hz) achieved only **1.981 pairs/s**. Mean per-eye inference was
 **227.048 ms**, P95 **257.872 ms**; summed pair inference P95 was about **517 ms**,
 with **5/20 pairs over 500 ms** even before acquisition costs. **Stable dual-eye
-2 Hz is not accepted**. It needs further scheduling/processing work and a longer
-combined-load test.
+2 Hz is not accepted**. That optional mode would need further scheduling/processing work
+and a longer combined-load test if requested; it does not block selected-eye acceptance.
 
 The separate profiled hardware run (5 + 20, 2 Hz) measured **201.634 ms** total
 detection mean. All **25** recorded compute-node executions belonged to

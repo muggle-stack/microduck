@@ -3,6 +3,9 @@
 What `scripts/provision-board.sh` does, as separate commands. Use this when a step needs to be
 tested on its own; use `provision-board.sh` when you just want a working board.
 
+**These steps target Radxa/aarch64.** SpaceMIT K1 / RISC-V uses the separate
+[native development installation](install-k1.md); do not run the Radxa setup scripts on it.
+
 ## Copy the files up
 
 From a clone on your machine. Into `~`, **not** `/tmp` — there is a reboot in the middle and

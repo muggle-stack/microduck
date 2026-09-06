@@ -4,6 +4,11 @@ Development branch: [muggle-stack/microduck:spacemit-k1](https://github.com/mugg
 Based on upstream `bc41fb5` (2026-09-05 checkout). This is a native-build and software-regression
 path, not a claim that the Radxa HAT, camera, radio, or installation image is interchangeable.
 
+For a fresh checkout, start with [native build and development installation](../robot/install-k1.md).
+That page owns the install procedure; this page keeps the dated measurements and bring-up record.
+Upstream `main` was checked again on 2026-09-06 and remained `bc41fb5`; no additional rebase
+was needed for the installation guide.
+
 ## Build on the K1
 
 The Rust target is **`riscv64gc-unknown-linux-gnu`**. Bianbu reports `riscv64` from `uname -m`;
@@ -46,6 +51,26 @@ The matching `libgstreamer-plugins-bad1.0-dev` and `libgstreamer-opencv1.0-0` pa
 in the official Bianbu archive's `pool/universe/g/gst-plugins-bad1.0/`, even though apt's current
 index only advertises the newer `bb18` vendor revision. Installing the matching dependencies
 added 17 packages, upgraded none, and removed none.
+
+### Development installation guide check — 2026-09-06
+
+The [development installation](../robot/install-k1.md) was exercised with the native SDK at
+`cc7c471`, using a new prefix under `target/k1-install-doc-20260906.CpdgHg/installed/`
+instead of a user's persistent installation directory. The cached full `--bins` release
+build passed in 2.63 s; all **12** installed daemon/diagnostic executables passed `--help`
+with an isolated identity directory, and every installed executable compared byte-identical
+to its build output (`cmp` exit 0).
+
+The pinned private MPP build also passed again. After copying its bundle to the new prefix,
+`ldd` resolved MPP inside that prefix and OpenCV at `/opt/opencv-spacemit`, with no missing
+libraries. The relocated image test passed **20 byte-exact synthetic cases and 13 invalid-input
+checks**. It uses V2D but opens no camera. The apt simulation still proposed five multimedia
+upgrades and two new packages; that transaction was not applied. This check did not reinstall Rust,
+upgrade apt packages, open the microphone/camera, provision a robot, or restart services.
+The official Rust archive checksum and installed 1.89.0/apt 1.75.0 coexistence were checked separately; a fresh-image
+installation and the full workspace test suite were not rerun for this documentation-only change.
+Logs are retained in the directory above (`verification.log`, `apt-simulation.log`, and
+`relocated-library-paths.log`).
 
 ## Repeat the software checks
 
@@ -331,6 +356,12 @@ measurements below predate this opt-in backend.
 The opt-in USB backend now feeds the SDK's existing selected-eye media/detection path.
 `camera-check` validates the same source and detector without the still-missing WebRTC plugin.
 The existing Radxa/IMX219 source remains the default; K1 CSI/ISP integration is separate.
+
+The current acceptance scope is **one selected eye**, including when the physical camera is
+packed stereo. Dual-eye extraction/inference below is an extra diagnostic, not a required
+deliverable. With the final MPP build, selected-eye 720p capture measured **30.05 fps** and
+live detection **192.8 ms mean** at 2 Hz under a hard four-CPU budget; see the MPP report for
+matching software baselines, repeated-run variation and pixel differences.
 
 On the connected DECXIN UVC camera (MJPEG 4000×1200 @30 advertised), native SDK tests passed
 for left/right selection, mono cropping, paired extraction, invalid-mode/device handling and

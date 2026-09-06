@@ -33,6 +33,18 @@ The policies it runs are trained next door, in
 **[microduck_rl](https://github.com/pollen-robotics/microduck_rl)** — MuJoCo and PPO, the sim2real
 recipe, and the export to ONNX that this repo loads.
 
+### SpaceMIT K1 / RISC-V fork
+
+The `spacemit-k1` branch of [muggle-stack/microduck](https://github.com/muggle-stack/microduck)
+adds native K1 development support while retaining the upstream Radxa backends.
+Start with [K1 build and development installation](docs/robot/install-k1.md): isolated Rust
+1.89, Bianbu dependencies, native binaries, USB selected-eye capture, and optional SpaceMIT
+ORT/EP and MPP acceleration. [Board results and remaining work](docs/project/spacemit-k1.md)
+separate tested SDK paths from hardware still awaiting integration.
+
+**This is not a ready-to-flash K1 robot image.** The provisioning, signed releases and OTA
+instructions below still target Radxa/aarch64; do not run them on a K1.
+
 ## It does things
 
 <table>
@@ -83,6 +95,7 @@ It also sits, kicks a ball, rolls forward on command, and quacks in a voice that
 | [microduck_rl](https://github.com/pollen-robotics/microduck_rl) | Where the policies come from: MuJoCo, PPO, domain randomisation, and the ONNX export this repo loads. |
 | [How it works](docs/design/architecture.md) | The whole system on one page — the daemons, the bus, how an update reaches a robot — then a page per part. |
 | [Set up a dev board](docs/robot/install-dev.md) | From a blank board to a robot that takes branch builds. |
+| [K1 / RISC-V development](docs/robot/install-k1.md) | Native build and isolated installation on Bianbu; no Radxa provisioning or automatic motor startup. |
 | [Dev cheat sheet](docs/robot/cheatsheet-dev.md) | Branch builds, release candidates, driving from a laptop, and the restart traps after an update. |
 | [Push your branch](docs/robot/dev-push.md) | Build on your machine, install over ssh, about a minute. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing, layout, conventions, releasing. |

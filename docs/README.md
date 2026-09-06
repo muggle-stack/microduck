@@ -18,6 +18,7 @@ docs give the reasoning and point at it.
 | [`duckctl.md`](robot/duckctl.md) | Every `duckctl` command — the robot from a laptop, over Bluetooth. |
 | [`install-dev.md`](robot/install-dev.md) | Setting up a board for development, from nothing. |
 | [`install-by-hand.md`](robot/install-by-hand.md) | The same install as separate commands, for testing one step at a time. |
+| [`install-k1.md`](robot/install-k1.md) | This fork's K1 / RISC-V native build and isolated development installation; not Radxa provisioning. |
 
 ## `design/` — you are changing the daemon
 
@@ -57,6 +58,10 @@ Dated records rather than reference. They describe a moment, and go stale on pur
 | [`slice-2-bringup.md`](project/slice-2-bringup.md) | What a real Radxa Zero 3W did with slice 2. |
 | [`update-over-ble.md`](project/update-over-ble.md) | Driving the update path from a phone: what it turned up, and what rollback over a radio was decided on. |
 | [`media-bringup.md`](project/media-bringup.md) | What a Radxa Zero 3W does about video: the VPU, what MPP needs, and the two plugins that have to be built. |
+| [`spacemit-k1.md`](project/spacemit-k1.md) | K1 native SDK regression, policies, ES8326, ORT/EP and the remaining hardware/deployment work. |
+| [`k1-duck-ort-ep.md`](project/k1-duck-ort-ep.md) | Native Rust detector integration, model requirements and measured hard CPU budgets. |
+| [`k1-usb-camera.md`](project/k1-usb-camera.md) | USB camera configuration, selected-eye semantics and software-path measurements. |
+| [`k1-mpp-camera.md`](project/k1-mpp-camera.md) | Opt-in MPP/V2D/OpenCV camera processing, pixel comparisons and board acceptance. |
 | [`pad-minimal-pairing.md`](project/pad-minimal-pairing.md) | The smallest board configuration a gamepad will bond under, found by taking one away at a time. |
 | [`idle-cpu.md`](project/idle-cpu.md) | What the daemons do when nobody is asking them to: four things that stopped, two that were measured and left alone, and what still wants a board. |
 
