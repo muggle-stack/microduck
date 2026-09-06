@@ -10,8 +10,8 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     echo 'Usage: sh scripts/build-k1-camera.sh /path/to/spacemit-com/mpp [output-directory]' >&2
     exit 1
 fi
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-mpp_source=$(CDPATH= cd -- "$1" && pwd)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+mpp_source=$(CDPATH='' cd -- "$1" && pwd)
 revision=2b97ffe84c06071774301fad5542fbe76fa62774
 jobs=${K1_BUILD_JOBS:-2}
 case "$jobs" in ''|*[!0-9]*|0) echo 'K1_BUILD_JOBS must be a positive integer' >&2; exit 1;; esac
@@ -24,7 +24,7 @@ case "$out" in
     *) echo 'Choose a dedicated subdirectory of this SDK workspace target/.' >&2; exit 1;;
 esac
 mkdir -p -- "$out"
-out=$(CDPATH= cd -- "$out" && pwd)
+out=$(CDPATH='' cd -- "$out" && pwd)
 for part in mpp-source mpp-build bridge-build lib libmicroduck_k1_camera.so camera-native-check camera-image-test lib/libmpp.so.1.0.0 lib/libv4l2_linlonv5v7_codec2.so; do
     if [ -L "$out/$part" ]; then
         echo "Refusing redirected build output: $out/$part" >&2

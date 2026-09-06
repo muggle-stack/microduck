@@ -115,6 +115,15 @@ jobs:
           sh -n hooks/postinstall
           shellcheck --shell=sh hooks/postinstall
 
+      # Validate the opt-in K1 scripts on every host; do not execute them here,
+      # because setup/capture need the operator's board and explicit hardware consent.
+      - name: Lint K1 helpers
+        run: |
+          for script in scripts/build-k1-camera.sh scripts/k1-test.sh scripts/setup-k1-audio.sh scripts/k1-audio-test.sh; do
+            sh -n "$script"
+            shellcheck --shell=sh "$script"
+          done
+
       # `board-test.sh` separately, because it needs different flags and was excluded for it.
       #
       # It builds the container-side checks as one enormous single-quoted string, so two codes fire on
