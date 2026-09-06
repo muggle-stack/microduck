@@ -1,0 +1,2 @@
+# Unified-diff blank context lines require a space; validate patch payloads with git apply.
+*.patch whitespace=-blank-at-eol,-blank-at-eof

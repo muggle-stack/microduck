@@ -9,9 +9,11 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
-use robotd_params::{CameraBackend, CameraFormat, CameraParams, CameraRect, Quality};
+use robotd_params::{
+    CameraAcceleration, CameraBackend, CameraFormat, CameraParams, CameraRect, Quality,
+};
 
-use crate::pipeline::{CAPTURE_FORMAT, Frame};
+use crate::pipeline::{CAPTURE_FORMAT, Frame, Rotation};
 
 fn element(name: &str) -> Result<gst::Element> {
     gst::ElementFactory::make(name)
@@ -41,15 +43,47 @@ fn filter(caps: &gst::Caps) -> Result<gst::Element> {
 /// Native USB mode is independent from the outgoing media quality. `None` keeps
 /// both eyes in the native frame; `Some` selects one ROI and letterboxes to that quality.
 pub fn source(camera: &CameraParams, output: Option<Quality>) -> Result<gst::Bin> {
+    source_with_rotation(camera, output, Rotation::None)
+}
+
+/// Physical output rotation, independent of mount metadata. K1 uses V2D;
+/// portable USB uses videoflip. Ordinary consumers should leave this at None.
+pub fn source_with_rotation(
+    camera: &CameraParams,
+    output: Option<Quality>,
+    rotation: Rotation,
+) -> Result<gst::Bin> {
     camera.validate().map_err(anyhow::Error::msg)?;
     ensure!(
         camera.backend == CameraBackend::Usb,
         "USB capture requires camera.backend = 'usb'"
     );
+    if let Some(q) = output {
+        ensure!(
+            q.fps() <= camera.fps,
+            "media frame rate exceeds native USB rate; choose a lower media.quality"
+        );
+    }
+    if camera.acceleration == CameraAcceleration::Spacemit {
+        return super::k1::source(camera, output, rotation.degrees());
+    }
     let src = gst::ElementFactory::make("v4l2src")
         .property("device", &camera.device)
         .build()?;
-    build(camera, output, src)
+    let input = build(camera, output, src)?;
+    let Some(direction) = rotation.video_direction() else {
+        return Ok(input);
+    };
+    let flip = gst::ElementFactory::make("videoflip")
+        .property_from_str("video-direction", direction)
+        .build()?;
+    let bin = gst::Bin::new();
+    bin.add_many([input.upcast_ref::<gst::Element>(), &flip])?;
+    input.link(&flip)?;
+    bin.add_pad(&gst::GhostPad::with_target(
+        &flip.static_pad("src").context("videoflip has no src pad")?,
+    )?)?;
+    Ok(bin)
 }
 
 fn build(camera: &CameraParams, output: Option<Quality>, src: gst::Element) -> Result<gst::Bin> {
@@ -74,8 +108,8 @@ fn build(camera: &CameraParams, output: Option<Quality>, src: gst::Element) -> R
     }
     let mut elements = vec![src, filter(&input.build())?];
     if camera.input_format == CameraFormat::Mjpeg {
-        // Deliberately the portable software decoder. Hardware decoding is a
-        // separate, unverified capability, not an automatic fallback/acceleration claim.
+        // The portable default. Hardware acceleration is selected explicitly
+        // before building this path; there is no automatic backend fallback.
         elements.push(element("jpegdec")?);
     }
     elements.push(element("videoconvert")?);
@@ -224,9 +258,18 @@ pub struct Capture {
 
 impl Capture {
     pub fn start(camera: &CameraParams, output: Option<Quality>) -> Result<Self> {
+        Self::start_with_rotation(camera, output, Rotation::None)
+    }
+
+    pub fn start_with_rotation(
+        camera: &CameraParams,
+        output: Option<Quality>,
+        rotation: Rotation,
+    ) -> Result<Self> {
         gst::init()?;
-        let src = source(camera, output)?;
+        let src = source_with_rotation(camera, output, rotation)?;
         let (width, height) = output.map_or((camera.width, camera.height), |q| q.size());
+        let (width, height) = rotation.output(width, height);
         Self::from_source(src, width, height)
     }
 
@@ -302,6 +345,26 @@ impl Drop for Capture {
 mod tests {
     use super::*;
     use robotd_params::{CameraLayout, CameraView};
+
+    /// Explicit hardware test, never run by ordinary CI or with an inferred device.
+    #[test]
+    #[ignore = "needs K1, a free MJPEG UVC camera, and explicit bridge/config environment"]
+    fn k1_repeated_open_read_drop() {
+        let path = std::env::var("MICRODUCK_K1_CAMERA_TEST_CONFIG").expect("explicit test config");
+        let params = robotd_params::Params::load(std::path::Path::new(&path), true).unwrap();
+        assert_eq!(params.camera.acceleration, CameraAcceleration::Spacemit);
+        for _ in 0..3 {
+            let capture = Capture::start(&params.camera, Some(params.media.quality)).unwrap();
+            let mut previous = None;
+            for _ in 0..5 {
+                let frame = capture.next_frame(Duration::from_secs(5)).unwrap();
+                let pts = frame.pts_ns.expect("capture PTS");
+                assert!(previous.is_none_or(|old| pts > old));
+                previous = Some(pts);
+            }
+            drop(capture); // Next open must work in this SAME process.
+        }
+    }
 
     #[test]
     fn sample_mapping_honors_video_meta_offset_and_row_padding() {

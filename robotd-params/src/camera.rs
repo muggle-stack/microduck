@@ -12,6 +12,15 @@ pub enum CameraBackend {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum CameraAcceleration {
+    #[default]
+    Software,
+    /// Explicit K1 MPP/OpenCV bridge; missing hardware/library is an error, not a fallback.
+    Spacemit,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CameraFormat {
     #[default]
     Mjpeg,
@@ -49,6 +58,7 @@ pub struct CameraRect {
 #[serde(deny_unknown_fields, default)]
 pub struct CameraParams {
     pub backend: CameraBackend,
+    pub acceleration: CameraAcceleration,
     /// Required for USB. Prefer /dev/v4l/by-id/...-video-index0 over a changing number.
     pub device: String,
     pub input_format: CameraFormat,
@@ -72,6 +82,7 @@ impl Default for CameraParams {
     fn default() -> Self {
         Self {
             backend: CameraBackend::Rockchip,
+            acceleration: CameraAcceleration::Software,
             device: String::new(),
             input_format: CameraFormat::Mjpeg,
             width: 1280,
@@ -99,6 +110,9 @@ impl CameraParams {
             return Err("camera.rotate must be 0, 90, 180 or 270 degrees".into());
         }
         if self.backend != CameraBackend::Usb {
+            if self.acceleration != CameraAcceleration::Software {
+                return Err("camera.acceleration = 'spacemit' requires backend = 'usb'".into());
+            }
             return Ok(());
         }
         if self.device.trim().is_empty() || !self.device.starts_with('/') {
@@ -121,7 +135,22 @@ impl CameraParams {
         if !(1..=120).contains(&self.fps) {
             return Err("USB camera.fps must be between 1 and 120".into());
         }
-        self.regions()?;
+        let (left, right) = self.regions()?;
+        if self.acceleration == CameraAcceleration::Spacemit {
+            if self.input_format != CameraFormat::Mjpeg
+                || self.width > 4096
+                || self.height > 2160
+                || !self.height.is_multiple_of(2)
+                || self.device.len() >= 128
+            {
+                return Err("SpaceMIT camera currently requires MJPEG, even dimensions up to 4096x2160, and a device path shorter than 128 bytes".into());
+            }
+            for r in std::iter::once(left).chain(right) {
+                if !r.y.is_multiple_of(2) || !r.height.is_multiple_of(2) {
+                    return Err("SpaceMIT NV12 camera ROI y/height must be even".into());
+                }
+            }
+        }
         Ok(())
     }
 
@@ -213,6 +242,10 @@ mod tests {
     #[test]
     fn defaults_preserve_radxa_and_usb_has_no_implicit_device_or_rotation() {
         assert_eq!(CameraParams::default().rotation(), 90);
+        assert_eq!(
+            CameraParams::default().acceleration,
+            CameraAcceleration::Software
+        );
         assert_eq!(usb().rotation(), 0);
         assert!(
             CameraParams {
@@ -222,6 +255,24 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn spacemit_is_explicit_mjpeg_only_and_validates_nv12_chroma_alignment() {
+        let mut p = usb();
+        p.acceleration = CameraAcceleration::Spacemit;
+        p.validate().unwrap();
+        p.left_roi = vec![0, 1, 640, 480];
+        assert!(p.validate().is_err());
+        p.acceleration = CameraAcceleration::Software;
+        p.validate().unwrap(); // UYVY software path still permits odd vertical origins.
+        p.acceleration = CameraAcceleration::Spacemit;
+        p.left_roi.clear();
+        p.input_format = CameraFormat::Yuyv;
+        assert!(p.validate().is_err());
+        p.input_format = CameraFormat::Mjpeg;
+        p.backend = CameraBackend::Rockchip;
+        assert!(p.validate().is_err());
     }
 
     #[test]

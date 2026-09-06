@@ -1,0 +1,58 @@
+diff --git a/utils/include/log.h b/utils/include/log.h
+--- a/utils/include/log.h
++++ b/utils/include/log.h
+@@ -19,10 +19,10 @@
+ #if USE_PRINTF
+-#define error(fmt, ...) printf("[MPP-ERROR] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
+-#define info(fmt, ...) printf("[MPP-INFO] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
++#define error(fmt, ...) fprintf(stderr, "[MPP-ERROR] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
++#define info(fmt, ...) fprintf(stderr, "[MPP-INFO] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
+ #if ENABLE_DEBUG
+-#define debug(fmt, ...) printf("[MPP-DEBUG] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
+-#define debug_pre(fmt, ...) printf("[MPP-DEBUG] %ld:%s:%d " fmt " ", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
+-#define debug_mid(fmt, ...) printf(" " fmt " ", ##__VA_ARGS__)
+-#define debug_after(fmt, ...) printf(" " fmt "\n", ##__VA_ARGS__)
++#define debug(fmt, ...) fprintf(stderr, "[MPP-DEBUG] %ld:%s:%d " fmt "\n", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
++#define debug_pre(fmt, ...) fprintf(stderr, "[MPP-DEBUG] %ld:%s:%d " fmt " ", gettid(), __FUNCTION__, __LINE__, ##__VA_ARGS__)
++#define debug_mid(fmt, ...) fprintf(stderr, " " fmt " ", ##__VA_ARGS__)
++#define debug_after(fmt, ...) fprintf(stderr, " " fmt "\n", ##__VA_ARGS__)
+ #else
+diff --git a/mpi/uvc/uvc.c b/mpi/uvc/uvc.c
+--- a/mpi/uvc/uvc.c
++++ b/mpi/uvc/uvc.c
+@@ -57,3 +57,3 @@
+ #define UVC_LOG_ERR(fmt, ...) fprintf(stderr, "[UVC][ERR] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+ #define UVC_LOG_WARN(fmt, ...) fprintf(stderr, "[UVC][WARN] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+-#define UVC_LOG_INFO(fmt, ...) fprintf(stdout, "[UVC][INFO] " fmt "\n", ##__VA_ARGS__)
++#define UVC_LOG_INFO(fmt, ...) fprintf(stderr, "[UVC][INFO] " fmt "\n", ##__VA_ARGS__)
+diff --git a/mpi/sys/vb.c b/mpi/sys/vb.c
+--- a/mpi/sys/vb.c
++++ b/mpi/sys/vb.c
+@@ -80,3 +80,3 @@
+ #define VB_LOG_ERR(fmt, ...) fprintf(stderr, "[VB][ERR] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+ #define VB_LOG_WARN(fmt, ...) fprintf(stderr, "[VB][WARN] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+-#define VB_LOG_INFO(fmt, ...) fprintf(stdout, "[VB][INFO] " fmt "\n", ##__VA_ARGS__)
++#define VB_LOG_INFO(fmt, ...) fprintf(stderr, "[VB][INFO] " fmt "\n", ##__VA_ARGS__)
+diff --git a/mpi/sys/mpp_shm.c b/mpi/sys/mpp_shm.c
+--- a/mpi/sys/mpp_shm.c
++++ b/mpi/sys/mpp_shm.c
+@@ -35,3 +35,3 @@
+ #define SHM_LOG_ERR(fmt, ...) fprintf(stderr, "[SHM][ERR] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+ #define SHM_LOG_WARN(fmt, ...) fprintf(stderr, "[SHM][WARN] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+-#define SHM_LOG_INFO(fmt, ...) fprintf(stdout, "[SHM][INFO] " fmt "\n", ##__VA_ARGS__)
++#define SHM_LOG_INFO(fmt, ...) fprintf(stderr, "[SHM][INFO] " fmt "\n", ##__VA_ARGS__)
+diff --git a/mpi/sys/dma_alloc.c b/mpi/sys/dma_alloc.c
+--- a/mpi/sys/dma_alloc.c
++++ b/mpi/sys/dma_alloc.c
+@@ -59,3 +59,3 @@
+ #define DMA_LOG_ERR(fmt, ...) fprintf(stderr, "[DMA][ERR] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+-#define DMA_LOG_INFO(fmt, ...) fprintf(stdout, "[DMA][INFO] " fmt "\n", ##__VA_ARGS__)
++#define DMA_LOG_INFO(fmt, ...) fprintf(stderr, "[DMA][INFO] " fmt "\n", ##__VA_ARGS__)
+diff --git a/mpi/sys/sys.c b/mpi/sys/sys.c
+--- a/mpi/sys/sys.c
++++ b/mpi/sys/sys.c
+@@ -44,3 +44,3 @@
+ #define SYS_LOG_ERR(fmt, ...) fprintf(stderr, "[SYS][ERR] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+ #define SYS_LOG_WARN(fmt, ...) fprintf(stderr, "[SYS][WARN] %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+-#define SYS_LOG_INFO(fmt, ...) fprintf(stdout, "[SYS][INFO] " fmt "\n", ##__VA_ARGS__)
++#define SYS_LOG_INFO(fmt, ...) fprintf(stderr, "[SYS][INFO] " fmt "\n", ##__VA_ARGS__)

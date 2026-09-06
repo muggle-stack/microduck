@@ -322,6 +322,12 @@ commands, the failed probes, and correction of the earlier standalone experiment
 
 ## USB camera: mono and packed stereo
 
+Optional hardware processing is now available through `camera.acceleration = "spacemit"`:
+private MPP codec2 JPEG decode, V2D crop/letterbox/rotation and SpaceMIT OpenCV UYVY packing.
+It does not replace system MPP or become the default. See [build instructions, pixel
+comparison, SDK measurements and remaining limits](k1-mpp-camera.md). The software-only
+measurements below predate this opt-in backend.
+
 The opt-in USB backend now feeds the SDK's existing selected-eye media/detection path.
 `camera-check` validates the same source and detector without the still-missing WebRTC plugin.
 The existing Radxa/IMX219 source remains the default; K1 CSI/ISP integration is separate.

@@ -95,6 +95,11 @@ pub const REGISTRY: &[Entry] = &[
         "Camera backend; the original Rockchip path remains the default",
     ),
     entry(
+        "camera.acceleration",
+        Kind::Choice(&["software", "spacemit"]),
+        "USB processing; spacemit requires the opt-in K1 MPP/OpenCV bridge (no fallback)",
+    ),
+    entry(
         "camera.device",
         Kind::Text,
         "USB capture device; prefer an explicit /dev/v4l/by-id/...-video-index0 path",

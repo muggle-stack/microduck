@@ -4,6 +4,11 @@ This is an **opt-in USB backend**, not an IMX219 ISP port and not a WebRTC port.
 The existing Radxa source remains the default (`camera.backend = "rockchip"`, mount 90°).
 USB defaults to mount 0°. `--rotate` overrides `camera.rotate` in `mediad`.
 
+An additional explicit `camera.acceleration = "spacemit"` path now uses a private
+MPP codec2/V2D bridge and the installed RVV OpenCV. The software results below remain
+historical baselines; see [K1 MPP build, exactness and acceptance](k1-mpp-camera.md).
+Neither the default backend nor detector preprocessing/model precision was changed.
+
 ## Implemented contract
 
 - `mediad` selects `camera.backend = "usb"` from the shared robotd TOML file.

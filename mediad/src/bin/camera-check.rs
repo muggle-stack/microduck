@@ -25,6 +25,10 @@ struct Args {
     /// Otherwise use mediad's selected-eye, aspect-preserving media output path.
     #[arg(long)]
     both_eyes: bool,
+    /// Physically rotate the selected output by camera.rotate (V2D on K1).
+    /// Normally only the detector rotates; native SBS extraction stays unrotated.
+    #[arg(long, conflicts_with = "both_eyes")]
+    flip_in_pipeline: bool,
     /// Run the existing detector on each returned view; no implicit CPU/precision fallback.
     #[arg(long)]
     detect: bool,
@@ -66,8 +70,12 @@ fn run(args: Args) -> anyhow::Result<()> {
         !args.both_eyes || camera.layout == CameraLayout::StereoSbs,
         "--both-eyes requires camera.layout = 'stereo_sbs'"
     );
-    let turn =
-        duck_detect::Turn::from_degrees(camera.rotation()).context("invalid camera rotation")?;
+    let turn = duck_detect::Turn::from_degrees(if args.flip_in_pipeline {
+        0
+    } else {
+        camera.rotation()
+    })
+    .context("invalid camera rotation")?;
     let mut engine = if args.detect {
         let mut options = mediad::detect::onnx_options(&params.detect);
         options.profile = args.profile.clone();
@@ -90,7 +98,16 @@ fn run(args: Args) -> anyhow::Result<()> {
             .with_context(|| format!("dump directory must be new: {}", dir.display()))?;
     }
     let started = Instant::now();
-    let capture = Capture::start(camera, (!args.both_eyes).then_some(params.media.quality))?;
+    let rotation = mediad::pipeline::Rotation::from_degrees(if args.flip_in_pipeline {
+        camera.rotation()
+    } else {
+        0
+    })?;
+    let capture = Capture::start_with_rotation(
+        camera,
+        (!args.both_eyes).then_some(params.media.quality),
+        rotation,
+    )?;
     let timeout = Duration::from_millis(u64::from(args.timeout_ms));
     let period = (args.hz > 0.0).then(|| Duration::from_secs_f64(1.0 / args.hz));
     let mut next = Instant::now();
@@ -182,7 +199,7 @@ fn run(args: Args) -> anyhow::Result<()> {
                     write_new(
                         dir.join("frame.json"),
                         serde_json::to_string_pretty(&json!({
-                        "camera":camera, "quality":params.media.quality, "frame":report} ))?
+                        "camera":camera, "quality":params.media.quality, "physical_rotation":rotation.degrees(), "frame":report} ))?
                         .as_bytes(),
                     )?;
                 }
@@ -208,6 +225,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     println!(
         "{}",
         json!({"event":"summary", "camera":camera, "both_eyes":args.both_eyes,
+        "physical_rotation":rotation.degrees(),
         "views":shapes, "frames":args.frames, "warmup":args.warmup, "consumer_hz":args.hz,
         "measured_seconds":seconds, "consumed_fps":f64::from(args.frames)/seconds,
         "source_pts_span_fps":source_span_fps, "nonincreasing_pts":nonincreasing_pts,
@@ -247,6 +265,21 @@ mod tests {
 
     #[test]
     fn bounded_and_explicit_cli() {
+        assert!(
+            Args::try_parse_from([
+                "camera-check",
+                "--config",
+                "usb.toml",
+                "--both-eyes",
+                "--flip-in-pipeline"
+            ])
+            .is_err()
+        );
+        assert!(
+            Args::try_parse_from(["camera-check", "--config", "usb.toml", "--flip-in-pipeline"])
+                .unwrap()
+                .flip_in_pipeline
+        );
         assert!(Args::try_parse_from(["camera-check"]).is_err());
         assert!(
             Args::try_parse_from(["camera-check", "--config", "usb.toml", "--frames", "0"])

@@ -4,6 +4,8 @@ use anyhow::{Result, ensure};
 use robotd_params::CameraRect;
 
 #[cfg(target_os = "linux")]
+mod k1;
+#[cfg(target_os = "linux")]
 pub mod usb;
 
 /// Copy a UYVY rectangle without resampling or interpreting its colours.

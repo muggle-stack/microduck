@@ -1,0 +1,66 @@
+diff --git a/al/module.c b/al/module.c
+--- a/al/module.c
++++ b/al/module.c
+@@ -12,6 +12,9 @@
+  */
+ 
+ #define ENABLE_DEBUG 1
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
+ 
+ #include "module.h"
+ 
+@@ -90,7 +93,23 @@ FIND_PLUGIN(SFDEC, sfdec, sfdec_plugin)
+ FIND_PLUGIN(FFMPEG, ffmpeg, ffmpegcodec)
+ FIND_PLUGIN(V4L2, v4l2, v4l2_standard_codec)
+ FIND_PLUGIN(FAKEDEC, fakedec, fake_dec_plugin)
+-FIND_PLUGIN(V4L2_LINLONV5V7, v4l2_linlonv5v7, v4l2_linlonv5v7_codec2)
++/* The camera bundle must never load a different system/user codec ABI. */
++S32 find_v4l2_linlonv5v7_plugin(U8 *path) {
++    Dl_info self;
++    if (!dladdr((void *)&find_v4l2_linlonv5v7_plugin, &self) || !self.dli_fname)
++        return 0;
++    const char *slash = strrchr(self.dli_fname, '/');
++    if (!slash)
++        return 0;
++    int len = snprintf((char *)path, MAX_PATH_LENGTH, "%.*s/libv4l2_linlonv5v7_codec2.so",
++                       (int)(slash - self.dli_fname), self.dli_fname);
++    if (len < 0 || len >= MAX_PATH_LENGTH)
++        return 0;
++    return access((const char *)path, R_OK) == 0;
++}
+ FIND_PLUGIN(K1_V2D, k1_v2d, v2d_plugin)
+ FIND_PLUGIN(K1_JPU, k1_jpu, jpu_plugin)
+ FIND_PLUGIN(VO_SDL2, vo_sdl2, vo_sdl2_plugin)
+diff --git a/al/vcodec/CMakeLists.txt b/al/vcodec/CMakeLists.txt
+--- a/al/vcodec/CMakeLists.txt
++++ b/al/vcodec/CMakeLists.txt
+@@ -26,13 +26,6 @@ target_link_libraries(v4l2_linlonv5v7_codec2 PRIVATE
+     -Wl,--no-as-needed mpp -Wl,--as-needed)
+ 
+-# Post-build: try copying to /usr/lib first; if no permission, fall back to $HOME/.mpp/plugins
+-add_custom_command(TARGET v4l2_linlonv5v7_codec2 POST_BUILD
+-    COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/install_plugin.sh $<TARGET_FILE:v4l2_linlonv5v7_codec2>
+-    COMMENT "Installing libv4l2_linlonv5v7_codec2.so to system or user plugin directory"
+-)
+-
+ install(TARGETS v4l2_linlonv5v7_codec2
+     LIBRARY DESTINATION lib
+ )
+diff --git a/mpi/cpp/CMakeLists.txt b/mpi/cpp/CMakeLists.txt
+--- a/mpi/cpp/CMakeLists.txt
++++ b/mpi/cpp/CMakeLists.txt
+@@ -3,6 +3,11 @@
+ # CPP wrapper backed by real k1x-cam cpp implementation
+ # ============================================================
+ 
++# This private USB build does not provision or link a MIPI ISP/CPP stack.
++if(MICRODUCK_K1_CAMERA_ONLY)
++    set(MPP_CPP_AVAILABLE OFF PARENT_SCOPE)
++    return()
++endif()
++
+ # Platform detection: check if K1 cpp library is available
+ find_library(CPP_LIB cpp)
+ 

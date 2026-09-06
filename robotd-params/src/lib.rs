@@ -19,7 +19,10 @@
 pub mod camera;
 pub mod edit;
 pub mod registry;
-pub use camera::{CameraBackend, CameraFormat, CameraLayout, CameraParams, CameraRect, CameraView};
+pub use camera::{
+    CameraAcceleration, CameraBackend, CameraFormat, CameraLayout, CameraParams, CameraRect,
+    CameraView,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -2712,6 +2715,10 @@ mod tests {
             ),
             (
                 include_str!("../../deploy/k1/camera-usb-decxin-sbs.toml"),
+                CameraLayout::StereoSbs,
+            ),
+            (
+                include_str!("../../deploy/k1/camera-usb-decxin-mpp.toml"),
                 CameraLayout::StereoSbs,
             ),
         ] {
