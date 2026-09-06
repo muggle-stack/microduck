@@ -5,6 +5,10 @@
 <h1 align="center">Microduck</h1>
 
 <p align="center">
+  <a href="README.md">English</a> · <a href="README_zh.md">简体中文</a>
+</p>
+
+<p align="center">
   <em>A tiny biped robot that moves using reinforcement learning policies.</em>
 </p>
 
@@ -41,6 +45,9 @@ Start with [K1 build and development installation](docs/robot/install-k1.md): is
 1.89, Bianbu dependencies, native binaries, USB selected-eye capture, and optional SpaceMIT
 ORT/EP and MPP acceleration. [Board results and remaining work](docs/project/spacemit-k1.md)
 separate tested SDK paths from hardware still awaiting integration.
+
+For supported platforms, feature adaptation progress and planned work, see the
+[Chinese adaptation status document](docs/project/spacemit-k1-adaptation-zh.md).
 
 **This is not a ready-to-flash K1 robot image.** The provisioning, signed releases and OTA
 instructions below still target Radxa/aarch64; do not run them on a K1.
