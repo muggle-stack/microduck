@@ -439,8 +439,7 @@ fn drop_unloadable_overrides(policy_params: &mut params::PolicyParams, errors: &
 }
 
 /// [`drop_unloadable_overrides`] with the check injected, so its two rules can be tested on a
-/// machine that has no ONNX Runtime — which is every machine this repository's tests run on, and
-/// is itself one of the cases the rules are about.
+/// machine that has no ONNX Runtime — itself one of the cases the rules are about.
 fn drop_unloadable_overrides_with(
     policy_params: &mut params::PolicyParams,
     errors: &mut SlotErrors,
@@ -4275,6 +4274,33 @@ async fn shutdown() {
 mod tests {
     use super::*;
 
+    /// A real ONNX policy, so validation does not depend on the runtime being absent.
+    /// IR 8 / opset 13: `Gather(obs: float[1,61], indices: int64[14], axis=1)` produces
+    /// `actions: float[1,14]`. The packed one-byte indices occupy bytes 76..90. Index 0
+    /// runs normally; index 100 passes graph/shape validation but fails warm-up inference.
+    /// Keeping the 153-byte protobuf here avoids a model download or generator dependency.
+    fn write_policy_fixture(path: &std::path::Path, gather_index: u8) {
+        assert!(
+            gather_index < 128,
+            "the fixture uses one-byte protobuf varints"
+        );
+        let mut model = [
+            0x08, 0x08, 0x3a, 0x90, 0x01, 0x0a, 0x2c, 0x0a, 0x03, 0x6f, 0x62, 0x73, 0x0a, 0x07,
+            0x69, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x12, 0x07, 0x61, 0x63, 0x74, 0x69, 0x6f,
+            0x6e, 0x73, 0x22, 0x06, 0x47, 0x61, 0x74, 0x68, 0x65, 0x72, 0x2a, 0x0b, 0x0a, 0x04,
+            0x61, 0x78, 0x69, 0x73, 0x18, 0x01, 0xa0, 0x01, 0x02, 0x12, 0x0e, 0x70, 0x6f, 0x6c,
+            0x69, 0x63, 0x79, 0x2d, 0x66, 0x69, 0x78, 0x74, 0x75, 0x72, 0x65, 0x2a, 0x1e, 0x0a,
+            0x01, 0x0e, 0x10, 0x07, 0x3a, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x42, 0x07, 0x69, 0x6e, 0x64, 0x69, 0x63, 0x65,
+            0x73, 0x5a, 0x15, 0x0a, 0x03, 0x6f, 0x62, 0x73, 0x12, 0x0e, 0x0a, 0x0c, 0x08, 0x01,
+            0x12, 0x08, 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x3d, 0x62, 0x19, 0x0a, 0x07,
+            0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x0e, 0x0a, 0x0c, 0x08, 0x01, 0x12,
+            0x08, 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x0e, 0x42, 0x02, 0x10, 0x0d,
+        ];
+        model[76..90].fill(gather_index);
+        std::fs::write(path, model).expect("write policy fixture");
+    }
+
     /// A `RobotState` over a real config file, for the two calls that write one.
     fn state_over(text: &str) -> (tempfile::TempDir, Arc<RobotState>) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4291,7 +4317,7 @@ mod tests {
     fn setting_a_skill_keeps_what_the_call_left_out() {
         let dir = tempfile::tempdir().expect("tempdir");
         let onnx = dir.path().join("bow.onnx");
-        std::fs::write(&onnx, b"not really an onnx").expect("write");
+        write_policy_fixture(&onnx, 0);
         let (_cfg, state) = state_over("");
         let intents = Intents::default();
 
@@ -5840,12 +5866,17 @@ mod tests {
     /// ever landed, and health reported "the loop has not completed a cycle" forever. The
     /// daemon looked wedged rather than saying what was wrong.
     ///
-    /// Works whether or not ONNX Runtime is installed: with it, the bogus path fails to
-    /// load; without it, the runtime probe fails first. Either way the contract is the same.
+    /// Works whether or not ONNX Runtime is installed: with it, the graph passes startup
+    /// override validation but fails warm-up inference; without it, the runtime probe fails
+    /// first. A missing file would instead discard the override and load the board's default,
+    /// making this test depend on which policies happen to be installed.
     #[tokio::test]
     async fn an_unloadable_policy_holds_the_pose_and_reports_why() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let onnx = dir.path().join("unrunnable-policy.onnx");
+        write_policy_fixture(&onnx, 100);
         let mut params = Params::default();
-        params.policy.walk = Some(PathBuf::from("/nonexistent/definitely-not-a-policy.onnx"));
+        params.policy.walk = Some(onnx);
         params.policy.stand = None;
 
         let resting = DEFAULT_POSITION;
@@ -5893,10 +5924,10 @@ mod tests {
         // The detail, not just the category. The updater quotes this string as the reason it
         // rolled a release back, so "policy unavailable" on its own is not actionable — that
         // is the same failure as the useless "loop has not completed a cycle" this branch
-        // exists to avoid. Which detail arrives depends on the machine: the bogus path where
+        // exists to avoid. Which detail arrives depends on the machine: the unrunnable path where
         // ONNX Runtime is installed, the runtime's own diagnosis where it is not.
         assert!(
-            reason.contains("definitely-not-a-policy.onnx") || reason.contains("ONNX Runtime"),
+            reason.contains("unrunnable-policy.onnx") || reason.contains("ONNX Runtime"),
             "health must carry the underlying cause, got {reason:?}"
         );
         assert!(

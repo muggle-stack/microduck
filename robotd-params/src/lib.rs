@@ -16,8 +16,13 @@
 //! test that walks [`Params`]'s own serialization, so a new section cannot be added without
 //! the registry (and therefore the editor) learning about it.
 
+pub mod camera;
 pub mod edit;
 pub mod registry;
+pub use camera::{
+    CameraAcceleration, CameraBackend, CameraFormat, CameraLayout, CameraParams, CameraRect,
+    CameraView,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -53,6 +58,7 @@ pub const DEFAULT_PATH: &str = "/etc/robot/robotd.toml";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Params {
+    pub camera: CameraParams,
     pub bus: Bus,
     pub control: Control,
     pub update_gate: UpdateGate,
@@ -360,9 +366,18 @@ pub struct DetectParams {
     /// Off by default. The detector costs a model in the release, ~50 ms of CPU per frame and some
     /// heat; a robot that nothing asks to look for ducks should not be paying for it.
     pub enabled: bool,
-    /// Where to look, and therefore *what runs it*: a `.rknn` goes to the NPU, an `.onnx` runs on
-    /// the CPU. Absent means the release's own model, NPU first — see [`DetectParams::model`].
+    /// A `.rknn` uses Rockchip's NPU; an `.onnx` uses `onnx_provider` (CPU by default).
+    /// SpaceMIT requires an explicit compatible ONNX, not the release's original opset 12 graph.
     pub model: Option<PathBuf>,
+    /// ONNX only. EP load errors are not retried on CPU; profile native per-node assignment.
+    pub onnx_provider: DetectOnnxProvider,
+    /// ORT intra-op threads and SpaceMIT EP's separate worker count. Default stays two.
+    pub onnx_threads: usize,
+    /// SpaceMIT worker CPU IDs separated by semicolons; "auto" leaves affinity to the provider.
+    pub spacemit_affinity: String,
+    /// Opt in to lower-precision epilogues. Needed by EP 2.0.6's experimental INT8 path; off
+    /// for the validated floating-point graph. Does not quantize or replace a model for you.
+    pub spacemit_allow_fp16_epilogue: bool,
     /// Frames per second to run the detector at.
     ///
     /// **2 Hz is a thermal number, not a taste.** Flat out on a Radxa Zero 3 this reaches 95 °C and
@@ -382,10 +397,22 @@ impl Default for DetectParams {
         Self {
             enabled: false,
             model: None,
+            onnx_provider: DetectOnnxProvider::Cpu,
+            onnx_threads: 2,
+            spacemit_affinity: "auto".into(),
+            spacemit_allow_fp16_epilogue: false,
             hz: 2.0,
             threshold: 0.35,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetectOnnxProvider {
+    #[default]
+    Cpu,
+    Spacemit,
 }
 
 impl MediaParams {
@@ -510,7 +537,8 @@ impl ThereminParams {
 pub struct AudioParams {
     /// Master switch: no sounds, no mic worker.
     pub enabled: bool,
-    /// ALSA playback device — the TLV320AIC3104 codec.
+    /// ALSA playback/capture PCM. Defaults to the Radxa's TLV320AIC3104;
+    /// a board profile can name a PCM that also handles rate/channel conversion.
     pub device: String,
     /// Where the per-robot voice bank lives. The release's postinstall renders it there
     /// (`sounds ensure-bank`), seeded from the SoC serial.
@@ -556,16 +584,16 @@ impl AudioParams {
         self.pet_detect.unwrap_or(false)
     }
 
-    /// The capture PCM for the mic worker: the playback device with subdevice 0. Only
-    /// appended when the operator has not already spelled a subdevice out — `plughw:aic3104`
-    /// in `robotd.toml` is the default and needs it, but the equally natural full spec
-    /// `plughw:aic3104,0` would otherwise become `plughw:aic3104,0,0`, which no card
-    /// answers to. That lands the worker in its restart loop for the life of the daemon.
+    /// Share the playback PCM with the mic worker. Keep the historical device-0
+    /// shorthand for hw/plughw cards, but leave named PCMs alone: appending `,0` to
+    /// `microduck_es8326`, `default`, or `null` changes the name into an invalid PCM.
     pub fn capture_device(&self) -> String {
-        if self.device.contains(',') {
-            self.device.clone()
-        } else {
+        if (self.device.starts_with("hw:") || self.device.starts_with("plughw:"))
+            && !self.device.contains(',')
+        {
             format!("{},0", self.device)
+        } else {
+            self.device.clone()
         }
     }
 
@@ -1644,6 +1672,10 @@ impl Default for UpdateGate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParamsError {
+    #[error("{path}: camera: {reason}")]
+    Camera { path: String, reason: String },
+    #[error("{path}: detect: {reason}")]
+    Detect { path: String, reason: String },
     #[error("reading {path}: {source}")]
     Read {
         path: String,
@@ -1738,6 +1770,41 @@ impl Params {
     /// Reject values that would produce a loop that cannot work, at startup rather than as
     /// a division by zero three seconds later.
     fn validate(&self, path: &Path) -> Result<(), ParamsError> {
+        self.camera
+            .validate()
+            .map_err(|reason| ParamsError::Camera {
+                path: path.display().to_string(),
+                reason,
+            })?;
+        let detect_error = |reason: &str| ParamsError::Detect {
+            path: path.display().to_string(),
+            reason: reason.into(),
+        };
+        if !(1..=256).contains(&self.detect.onnx_threads) {
+            return Err(detect_error("onnx_threads must be between 1 and 256"));
+        }
+        if self.detect.onnx_provider == DetectOnnxProvider::Spacemit {
+            let affinity = &self.detect.spacemit_affinity;
+            if !affinity.is_empty() && affinity != "auto" {
+                let cores: Vec<_> = affinity.split(';').collect();
+                if cores.len() != self.detect.onnx_threads
+                    || !cores.iter().all(|s| s.parse::<u32>().is_ok())
+                {
+                    return Err(detect_error(
+                        "spacemit_affinity needs one CPU ID per thread, separated by ';'",
+                    ));
+                }
+            }
+            if self.detect.enabled
+                && !self.detect.model.as_ref().is_some_and(|model| {
+                    is_none_sentinel(model) || model.extension().is_some_and(|ext| ext == "onnx")
+                })
+            {
+                return Err(detect_error(
+                    "SpaceMIT requires an explicit compatible .onnx model (opset 17); the release's original opset 12 model is unsupported",
+                ));
+            }
+        }
         if self.control.hz == 0 || self.control.hz > 1000 {
             return Err(ParamsError::Rate {
                 path: path.display().to_string(),
@@ -1810,6 +1877,11 @@ fn without_unknown_keys(text: &str) -> Option<(Result<Params, toml::de::Error>, 
             ignored.push(format!("[{section}]"));
             return false;
         }
+        // Camera keys select physical hardware and geometry. Keep this new section strict:
+        // pruning a misspelt backend/ROI could select a different device or the wrong eye.
+        if section == "camera" {
+            return true;
+        }
         fields.retain(|key, _| {
             if registry::entry_for(&format!("{section}.{key}")).is_some() {
                 true
@@ -1832,6 +1904,30 @@ fn without_unknown_keys(text: &str) -> Option<(Result<Params, toml::de::Error>, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detector_provider_is_opt_in_and_requires_a_compatible_model_path() {
+        use super::*;
+        let mut params: Params = toml::from_str("[detect]\nenabled = true").unwrap();
+        assert_eq!(params.detect.onnx_provider, DetectOnnxProvider::Cpu);
+        assert_eq!(params.detect.onnx_threads, 2);
+        assert!(!params.detect.spacemit_allow_fp16_epilogue);
+        let path = Path::new("test.toml");
+        assert!(params.validate(path).is_ok());
+        params.detect.onnx_provider = DetectOnnxProvider::Spacemit;
+        assert!(params.validate(path).is_err());
+        params.detect.model = Some("duck.rknn".into());
+        assert!(params.validate(path).is_err());
+        params.detect.model = Some("duck.slim.onnx".into());
+        params.detect.spacemit_affinity = "0;1".into();
+        assert!(params.validate(path).is_ok());
+        params.detect.spacemit_affinity = "0;1;2".into();
+        assert!(params.validate(path).is_err());
+        params.detect.spacemit_affinity.clear();
+        params.detect.onnx_threads = 0;
+        assert!(params.validate(path).is_err());
+        assert!(toml::from_str::<Params>("[detect]\nonnx_provider = 'unknown'").is_err());
+    }
+
     /// [`Slot::as_str`] must be the *serde key*, because `robotctl policy load` writes
     /// `policy.<slot>` into `robotd.toml` with it. A display name that merely reads well —
     /// `sit_stand`, `groundPick` — would write a key `Params` then ignores as unknown, and the
@@ -2572,6 +2668,76 @@ mod tests {
             ..AudioParams::default()
         };
         assert_eq!(spelled_out.capture_device(), "plughw:aic3104,0");
+    }
+
+    #[test]
+    fn named_audio_pcms_are_passed_to_capture_unchanged() {
+        for device in [
+            "microduck_es8326",
+            "default",
+            "null",
+            "sysdefault:CARD=sndes8326",
+            "plughw:CARD=sndes8326,DEV=0",
+            "hw:1,0",
+        ] {
+            let audio = AudioParams {
+                device: device.to_owned(),
+                ..AudioParams::default()
+            };
+            assert_eq!(audio.capture_device(), device);
+        }
+        assert_eq!(AudioParams::default().device, "plughw:aic3104");
+        assert_eq!(AudioParams::default().capture_device(), "plughw:aic3104,0");
+    }
+
+    #[test]
+    fn the_k1_audio_profile_selects_the_same_pcm_for_both_directions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(
+            dir.path(),
+            include_str!("../../deploy/k1/robotd-audio.toml"),
+        );
+        let params = Params::load(&path, true).unwrap();
+        assert!(params.audio.enabled);
+        assert_eq!(params.audio.device, "microduck_es8326");
+        assert_eq!(params.audio.capture_device(), "microduck_es8326");
+        // Selecting a codec must not opt the operator into microphone monitoring.
+        assert!(!params.audio.pet_detect_resolved(params.policy.mode));
+    }
+
+    #[test]
+    fn usb_profiles_round_trip_through_the_real_loader() {
+        let dir = tempfile::tempdir().unwrap();
+        for (text, layout) in [
+            (
+                include_str!("../../deploy/k1/camera-usb-mono.toml"),
+                CameraLayout::Mono,
+            ),
+            (
+                include_str!("../../deploy/k1/camera-usb-decxin-sbs.toml"),
+                CameraLayout::StereoSbs,
+            ),
+            (
+                include_str!("../../deploy/k1/camera-usb-decxin-mpp.toml"),
+                CameraLayout::StereoSbs,
+            ),
+        ] {
+            let params = Params::load(&write(dir.path(), text), true).unwrap();
+            assert_eq!(params.camera.backend, CameraBackend::Usb);
+            assert_eq!(params.camera.layout, layout);
+            assert_eq!(params.camera.rotation(), 0);
+            assert!(
+                !params.detect.enabled,
+                "camera profile must not enable inference implicitly"
+            );
+            assert_eq!(params.media.quality, Quality::Q720p30);
+        }
+        for text in [
+            "[camera]\nbacked = 'usb'\ndevice = '/dev/test'\n",
+            "[camera]\nbackend = 'usb'\ndevice = '/dev/test'\nleft_rol = [0,0,640,720]\n[future_section]\nignored = true\n",
+        ] {
+            assert!(Params::load(&write(dir.path(), text), true).is_err());
+        }
     }
 
     /// An unprovisioned board must still come up. A daemon that refuses to start because a

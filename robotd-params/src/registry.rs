@@ -88,6 +88,63 @@ const fn feature(key: &'static str, kind: Kind, doc: &'static str) -> Entry {
 
 /// Every key, grouped by section, sections in the shipped file's order.
 pub const REGISTRY: &[Entry] = &[
+    // Camera input is independent of the outgoing [media] quality ladder.
+    entry(
+        "camera.backend",
+        Kind::Choice(&["rockchip", "usb"]),
+        "Camera backend; the original Rockchip path remains the default",
+    ),
+    entry(
+        "camera.acceleration",
+        Kind::Choice(&["software", "spacemit"]),
+        "USB processing; spacemit requires the opt-in K1 MPP/OpenCV bridge (no fallback)",
+    ),
+    entry(
+        "camera.device",
+        Kind::Text,
+        "USB capture device; prefer an explicit /dev/v4l/by-id/...-video-index0 path",
+    ),
+    entry(
+        "camera.input_format",
+        Kind::Choice(&["mjpeg", "yuyv", "uyvy", "nv12"]),
+        "Format advertised by the USB camera, before decoding/conversion",
+    ),
+    entry(
+        "camera.width",
+        Kind::Integer,
+        "Native USB capture width, not the outgoing stream width",
+    ),
+    entry("camera.height", Kind::Integer, "Native USB capture height"),
+    entry(
+        "camera.fps",
+        Kind::Integer,
+        "Native USB capture frame rate; choose an advertised mode",
+    ),
+    entry(
+        "camera.layout",
+        Kind::Choice(&["mono", "stereo_sbs"]),
+        "One view or two views packed into the same USB frame; no depth reconstruction",
+    ),
+    entry(
+        "camera.view",
+        Kind::Choice(&["left", "right"]),
+        "Eye supplied to the existing video and detector; mono uses left",
+    ),
+    entry(
+        "camera.left_roi",
+        Kind::IntegerList,
+        "[x,y,width,height] in the unrotated input; empty means full mono/left half",
+    ),
+    entry(
+        "camera.right_roi",
+        Kind::IntegerList,
+        "Right-eye [x,y,width,height]; empty means the right half in stereo_sbs",
+    ),
+    entry(
+        "camera.rotate",
+        Kind::OptionalInteger,
+        "Mount rotation clockwise; unset means Rockchip 90 degrees, USB 0",
+    ),
     // ── [bus] ────────────────────────────────────────────────────────────────
     entry("bus.port", Kind::Text, "Dynamixel serial port device"),
     // ── [control] ────────────────────────────────────────────────────────────
@@ -298,7 +355,27 @@ pub const REGISTRY: &[Entry] = &[
     entry(
         "detect.model",
         Kind::OptionalPath,
-        "Model to run; unset = the release's, .rknn on the NPU before .onnx on the CPU",
+        "Model to run; unset = release RKNN then CPU ONNX. SpaceMIT needs an explicit ONNX",
+    ),
+    entry(
+        "detect.onnx_provider",
+        Kind::Choice(&["cpu", "spacemit"]),
+        "ONNX backend (restart mediad); SpaceMIT load failures are not retried on CPU",
+    ),
+    entry(
+        "detect.onnx_threads",
+        Kind::Integer,
+        "ORT and SpaceMIT EP intra-op threads, 1..256; default 2",
+    ),
+    entry(
+        "detect.spacemit_affinity",
+        Kind::Text,
+        "SpaceMIT worker CPU IDs, e.g. 0;1;2;3; auto = provider default",
+    ),
+    entry(
+        "detect.spacemit_allow_fp16_epilogue",
+        Kind::Bool,
+        "Allow lower-precision EP epilogues; experimental INT8 requires it",
     ),
     entry(
         "detect.hz",
@@ -354,7 +431,7 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Bool,
         "The voice and the microphone; off walks identically and stays quiet",
     ),
-    entry("audio.device", Kind::Text, "ALSA playback device"),
+    entry("audio.device", Kind::Text, "ALSA playback/capture PCM"),
     entry("audio.bank", Kind::Text, "Voice bank directory"),
     feature(
         "audio.greet",

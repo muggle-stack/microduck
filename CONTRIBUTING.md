@@ -5,14 +5,21 @@ For working on the daemons themselves. To use a robot rather than change it, see
 
 ## Building and testing
 
-Needs Rust **1.89+** (stable). The robot is aarch64 Linux; you develop on Linux or macOS, and
-the two are not quite the same checkout — see below.
+Needs Rust **1.89+** (stable). The upstream robot is aarch64 Linux; this fork also supports
+native development on SpaceMIT K1 / RISC-V. You develop on Linux or macOS, and the two are not
+quite the same checkout — see below.
 
 ```bash
 cargo test --workspace
 ```
 
 No hardware, no network, no Docker. If they pass, your checkout is sound.
+
+For K1 toolchain setup, dependencies and installation, use the
+[K1 development guide](docs/robot/install-k1.md). `cargo k1 --locked --bins -j 2` builds
+**on the K1**, for `riscv64gc-unknown-linux-gnu`; `sh scripts/k1-test.sh` runs native
+software regression. `cargo board` continues to cross-build for the shipped Radxa.
+These are separate from the aarch64 release/provisioning workflow described below.
 
 **On Linux** that command needs some C libraries first, the same ones CI installs: `padd` binds
 `libudev` through `gilrs`, and `mediad`'s pipeline is `cfg(target_os = "linux")`, so a Linux host
@@ -25,6 +32,10 @@ sudo apt-get install -y libudev-dev libgstreamer1.0-dev
 ```bash
 sudo apt-get install -y libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
 ```
+
+The synthetic USB tests also need `gstreamer1.0-plugins-base` and
+`gstreamer1.0-plugins-good`. On Bianbu, review the apt simulation and match headers to the
+installed vendor runtime as described in the K1 guide before installing or upgrading them.
 
 **On macOS** the command above is the whole of it — **942 tests passing**, nothing excluded. Two
 of the ToF driver's own tests do not run there, because there is no driver to run them against:

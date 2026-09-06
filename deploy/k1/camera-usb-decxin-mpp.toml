@@ -1,0 +1,21 @@
+# Opt-in hardware camera path. Build scripts/build-k1-camera.sh first and set
+# MICRODUCK_K1_CAMERA_LIB to the absolute libmicroduck_k1_camera.so path.
+# Hardware JPEG decode/scaling is NOT pixel-identical to the software backend.
+# No model weights, detector preprocessing, precision or threshold are changed.
+[camera]
+backend = "usb"
+acceleration = "spacemit"
+device = "/dev/v4l/by-id/usb-DECXIN_DECXIN_Camera_01.00.00-video-index0"
+input_format = "mjpeg"
+width = 4000
+height = 1200
+fps = 30
+layout = "stereo_sbs"
+view = "left"
+left_roi = [160, 0, 1920, 1200]
+right_roi = [2080, 0, 1920, 1200]
+rotate = 0
+
+[media]
+camera = true
+quality = "720p30"

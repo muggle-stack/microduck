@@ -121,6 +121,15 @@ pub enum Rotation {
 }
 
 impl Rotation {
+    pub fn degrees(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Cw90 => 90,
+            Self::Cw180 => 180,
+            Self::Cw270 => 270,
+        }
+    }
+
     /// From degrees clockwise, which is how the flag is written.
     pub fn from_degrees(degrees: u32) -> Result<Self> {
         match degrees {
@@ -137,7 +146,7 @@ impl Rotation {
     /// `videoflip`'s `video-direction`, or `None` where there is nothing to do.
     ///
     /// `90r` is clockwise and `90l` anticlockwise, which is GStreamer's naming and not ours.
-    fn video_direction(self) -> Option<&'static str> {
+    pub(crate) fn video_direction(self) -> Option<&'static str> {
         match self {
             Self::None => None,
             Self::Cw90 => Some("90r"),
@@ -151,7 +160,7 @@ impl Rotation {
     /// Everything that reads a raw frame depends on this being right: [`Frame`] carries the
     /// dimensions the buffer is in, and a consumer handed 1280x720 for a 720x1280 buffer reads
     /// the picture diagonally rather than failing.
-    fn output(self, width: u32, height: u32) -> (u32, u32) {
+    pub fn output(self, width: u32, height: u32) -> (u32, u32) {
         match self {
             Self::Cw90 | Self::Cw270 => (height, width),
             Self::None | Self::Cw180 => (width, height),
@@ -193,6 +202,11 @@ pub enum Source {
     Test,
     /// The head camera, through the rkisp capture path.
     Camera(Camera),
+    /// One explicit USB device; optionally selects an eye from a packed stereo frame.
+    Usb {
+        camera: robotd_params::CameraParams,
+        quality: robotd_params::Quality,
+    },
 }
 
 /// The head camera, and the two things it will not work without.
@@ -395,6 +409,11 @@ pub fn start(
 
     let pipeline = gst::Pipeline::new();
 
+    // The opt-in K1 source rotates in V2D before publishing UYVY. Radxa and the
+    // portable USB path retain the existing common videoflip stage.
+    let source_rotates = matches!(&source, Source::Usb { camera, .. }
+        if camera.acceleration == robotd_params::CameraAcceleration::Spacemit);
+
     let src = match &source {
         Source::Test => {
             let src = make("videotestsrc")?;
@@ -404,6 +423,22 @@ pub fn start(
             src
         }
         Source::Camera(camera) => camera_source(camera, fps)?,
+        Source::Usb { camera, quality } => {
+            anyhow::ensure!(
+                (width, height, fps) == (quality.width(), quality.height(), quality.fps()),
+                "USB output quality differs from pipeline settings"
+            );
+            crate::camera::usb::source_with_rotation(
+                camera,
+                Some(*quality),
+                if source_rotates {
+                    rotation
+                } else {
+                    Rotation::None
+                },
+            )?
+            .upcast()
+        }
     };
 
     // Pinned rather than negotiated, because both branches of the tee depend on the answer, and a
@@ -426,10 +461,15 @@ pub fn start(
     //
     // `mpph264enc` lists `UYVY` on its sink pad and converts on the SoC's 2D accelerator, so the
     // 4:2:2 to 4:2:0 step costs no CPU — the RGA was already doing one operation per frame.
+    let (capture_width, capture_height) = if source_rotates {
+        (out_width, out_height)
+    } else {
+        (width, height)
+    };
     let caps = gst::Caps::builder("video/x-raw")
         .field("format", CAPTURE_FORMAT)
-        .field("width", width as i32)
-        .field("height", height as i32)
+        .field("width", capture_width as i32)
+        .field("height", capture_height as i32)
         .field("framerate", gst::Fraction::new(fps as i32, 1))
         .build();
     let capsfilter = gst::ElementFactory::make("capsfilter")
@@ -447,7 +487,11 @@ pub fn start(
     // Left in for the consumer that cannot rotate for itself and can afford this. If that ever
     // becomes the common case, the fix is an RGA element in the plugin set (the 2D engine can
     // rotate for nothing), not this.
-    let flip = match rotation.video_direction() {
+    let flip = match if source_rotates {
+        None
+    } else {
+        rotation.video_direction()
+    } {
         Some(direction) => Some(
             gst::ElementFactory::make("videoflip")
                 .property_from_str("video-direction", direction)
@@ -700,28 +744,15 @@ fn wire_frames(appsink: &gst_app::AppSink, frames: Frames, width: u32, height: u
                 if !frames.take_request() {
                     return Ok(gst::FlowSuccess::Ok);
                 }
-                let Some(buffer) = sample.buffer() else {
-                    return Ok(gst::FlowSuccess::Ok);
-                };
-                // `UYVY` is a single plane, so this maps without merging anything — unlike the
-                // `NM12` this used to carry, where mapping silently copied two non-contiguous
-                // planes into one block. The `to_vec` below is still a copy, and still the only
-                // one on this branch.
-                let Ok(map) = buffer.map_readable() else {
-                    // A buffer that will not map is not worth failing the pipeline over — the next
-                    // one is a frame away, and this branch is advisory by design. The request has
-                    // been taken by now, so the reader waits out its timeout rather than being
-                    // answered with nothing; a map that fails twice running is a pipeline in
-                    // trouble, not a frame to retry for.
-                    tracing::debug!("a raw frame would not map");
-                    return Ok(gst::FlowSuccess::Ok);
-                };
-                frames.deliver(Frame {
-                    width,
-                    height,
-                    format: CAPTURE_FORMAT,
-                    data: map.as_slice().to_vec(),
-                });
+                // Honor negotiated stride/offset, but copy only on demand as before.
+                // A driver may pad rows; consumers require tightly packed UYVY.
+                match crate::camera::usb::frame_from_sample(&sample) {
+                    Ok(frame) if (frame.width, frame.height) == (width, height) => {
+                        frames.deliver(frame);
+                    }
+                    Ok(_) => tracing::warn!("raw frame geometry differs from the pipeline"),
+                    Err(error) => tracing::debug!(%error, "a raw frame could not be read"),
+                }
 
                 Ok(gst::FlowSuccess::Ok)
             })
@@ -1626,6 +1657,7 @@ mod tests {
             (270, Rotation::Cw270),
         ] {
             assert_eq!(Rotation::from_degrees(degrees).unwrap(), expected);
+            assert_eq!(expected.degrees(), degrees);
         }
         for bad in [45, 89, 91, 360, 1] {
             let error = Rotation::from_degrees(bad).unwrap_err().to_string();

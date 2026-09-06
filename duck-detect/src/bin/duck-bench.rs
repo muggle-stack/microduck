@@ -19,19 +19,45 @@
 //! capture session are already the right thing, and a benchmark that has to stop a daemon is a
 //! benchmark nobody runs twice.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use duck_detect::{decode, letterbox_rgb, rknn::Model};
+use duck_detect::{decode, letterbox_rgb, onnx, rknn};
 
 #[derive(Parser)]
 #[command(about = "Run the duck detector on this board and report what it costs")]
 struct Args {
-    /// The quantised model, as `scripts/to_rknn.py` in the duck_detector repo writes it.
+    /// One-class detector: .rknn or .onnx, with a [1,5,N] output head.
     #[arg(long)]
     model: PathBuf,
+
+    /// ONNX only. EP load failures are errors; use profiling to check native CPU node fallback.
+    #[arg(long, value_enum, default_value_t = onnx::Provider::Cpu)]
+    onnx_provider: onnx::Provider,
+
+    /// ORT and SpaceMIT EP intra-op threads (independent pools, same configured count).
+    #[arg(long, default_value_t = 2)]
+    threads: usize,
+
+    /// SpaceMIT worker CPU IDs, one per thread, e.g. '0;1;2;3'.
+    #[arg(long, default_value = "")]
+    spacemit_affinity: String,
+
+    /// Allow lower-precision epilogues; required for experimental EP 2.0.6 INT8 models.
+    #[arg(long)]
+    spacemit_allow_fp16_epilogue: bool,
+
+    /// After timing, run one frame in a separate profiled ONNX session to prove EP coverage.
+    #[arg(long)]
+    profile_prefix: Option<PathBuf>,
+
+    /// Save first-pass raw output tensors as little-endian f32, in sorted JPEG order.
+    /// Written after timing; an existing file is never overwritten.
+    #[arg(long)]
+    dump_outputs: Option<PathBuf>,
 
     /// A directory of JPEGs — a capture session works, and so does anything else.
     #[arg(long)]
@@ -62,6 +88,56 @@ struct Args {
     /// Print a line per frame, for finding the one frame that behaves differently.
     #[arg(long)]
     verbose: bool,
+}
+
+enum Model {
+    Rknn(rknn::Model),
+    Onnx(onnx::Model),
+}
+
+impl Model {
+    fn open(path: &Path, options: &onnx::Options) -> Result<Self> {
+        if path.extension().is_some_and(|ext| ext == "rknn") {
+            anyhow::ensure!(
+                options.provider == onnx::Provider::Cpu,
+                "SpaceMIT EP needs an .onnx model, not .rknn"
+            );
+            let model = rknn::Model::open(path)?;
+            println!(
+                "RKNN api {} · driver {} · {} outputs",
+                model.api_version, model.driver_version, model.output_len
+            );
+            Ok(Self::Rknn(model))
+        } else {
+            anyhow::ensure!(
+                path.extension().is_some_and(|ext| ext == "onnx"),
+                "model must end in .onnx or .rknn"
+            );
+            let model = onnx::Model::open_with_options(path, options)?;
+            println!(
+                "ONNX provider {:?} · threads {} · EP affinity {:?} · allow FP16 epilogue {}",
+                options.provider,
+                options.threads,
+                options.spacemit_affinity,
+                options.spacemit_allow_fp16_epilogue
+            );
+            Ok(Self::Onnx(model))
+        }
+    }
+
+    fn input(&self) -> (usize, usize, usize) {
+        match self {
+            Self::Rknn(model) => model.input,
+            Self::Onnx(model) => model.input,
+        }
+    }
+
+    fn infer(&mut self, input: &[u8], output: &mut Vec<f32>) -> Result<()> {
+        match self {
+            Self::Rknn(model) => model.infer(input, output),
+            Self::Onnx(model) => model.infer(input, output),
+        }
+    }
 }
 
 /// CPU seconds this process has used, from `/proc/self/stat` — user + system, in seconds.
@@ -120,6 +196,14 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
     sorted[index]
 }
 
+fn reporting_hz(configured: f64, frames: usize, wall: Duration) -> f64 {
+    if configured > 0.0 {
+        configured
+    } else {
+        frames as f64 / wall.as_secs_f64()
+    }
+}
+
 fn jpegs(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(directory)
         .with_context(|| format!("cannot read {}", directory.display()))?
@@ -144,19 +228,38 @@ fn main() -> Result<()> {
         )
         .init();
     let args = Args::parse();
+    anyhow::ensure!(args.passes > 0, "passes must be greater than zero");
+    anyhow::ensure!(
+        args.hz.is_finite() && args.hz >= 0.0,
+        "hz must be finite and nonnegative"
+    );
+    if args.profile_prefix.is_some() {
+        anyhow::ensure!(
+            args.model.extension().is_some_and(|ext| ext == "onnx"),
+            "profiling is only supported for ONNX"
+        );
+    }
+    if let Some(path) = &args.dump_outputs {
+        anyhow::ensure!(!path.exists(), "output already exists: {}", path.display());
+    }
+    let options = onnx::Options {
+        provider: args.onnx_provider,
+        threads: args.threads,
+        spacemit_affinity: args.spacemit_affinity.clone(),
+        spacemit_allow_fp16_epilogue: args.spacemit_allow_fp16_epilogue,
+        profile: None,
+    };
 
     let paths = jpegs(&args.frames)?;
-    let mut model = Model::open(&args.model)?;
-    let (height, width, channels) = model.input;
+    let mut model = Model::open(&args.model, &options)?;
+    let (height, width, channels) = model.input();
     println!(
-        "runtime api {} · driver {}\nmodel {}×{}×{}, {} outputs\n{} frames, {} passes\n",
-        model.api_version,
-        model.driver_version,
+        "model {}×{}×{}\n{} frames, {} warmups, {} passes\n",
         width,
         height,
         channels,
-        model.output_len,
         paths.len(),
+        args.warmup,
         args.passes
     );
     if channels != 3 || width != height {
@@ -176,8 +279,8 @@ fn main() -> Result<()> {
     let mut square = Vec::new();
     let mut raw = Vec::new();
 
-    for _ in 0..args.warmup.min(frames.len().max(1)) {
-        let (_, image) = &frames[0];
+    for i in 0..args.warmup {
+        let (_, image) = &frames[i % frames.len()];
         let fit = letterbox_rgb(
             image.as_raw(),
             image.width() as usize,
@@ -190,6 +293,8 @@ fn main() -> Result<()> {
     }
 
     let mut latencies: Vec<Duration> = Vec::with_capacity(frames.len() * args.passes);
+    let mut processing_latencies = Vec::with_capacity(frames.len() * args.passes);
+    let mut saved_outputs = Vec::new();
     let mut with_a_duck = 0usize;
     let mut detections = 0usize;
     let cpu_before = cpu_seconds()?;
@@ -213,6 +318,7 @@ fn main() -> Result<()> {
                 }
                 next += period;
             }
+            let processing_started = Instant::now();
             let fit = letterbox_rgb(
                 image.as_raw(),
                 image.width() as usize,
@@ -224,8 +330,12 @@ fn main() -> Result<()> {
             model.infer(&square, &mut raw)?;
             let found = decode(&raw, fit, args.threshold, 0.5);
             latencies.push(started.elapsed());
+            processing_latencies.push(processing_started.elapsed());
 
             if pass == 0 {
+                if args.dump_outputs.is_some() {
+                    saved_outputs.extend_from_slice(&raw);
+                }
                 detections += found.len();
                 if !found.is_empty() {
                     with_a_duck += 1;
@@ -236,8 +346,9 @@ fn main() -> Result<()> {
                         .map(|d| format!("{:.2} at {:.0},{:.0}", d.score, d.box_[0], d.box_[1]))
                         .unwrap_or_else(|| "nothing".into());
                     println!(
-                        "  {}: {} ({:.1} ms)",
+                        "  {}: {} detections · {} ({:.1} ms)",
                         path.file_name().unwrap_or_default().to_string_lossy(),
+                        found.len(),
                         best,
                         latencies.last().unwrap().as_secs_f64() * 1e3
                     );
@@ -249,7 +360,22 @@ fn main() -> Result<()> {
     let wall = wall_before.elapsed();
     let cpu = cpu_seconds()? - cpu_before;
     latencies.sort();
+    processing_latencies.sort();
     let millis = |d: Duration| d.as_secs_f64() * 1e3;
+    let mean_ms = |samples: &[Duration]| {
+        samples.iter().map(|d| millis(*d)).sum::<f64>() / samples.len() as f64
+    };
+
+    println!(
+        "inference + decode mean {:.3} ms (includes RGB -> NCHW); {} samples",
+        mean_ms(&latencies),
+        latencies.len()
+    );
+    println!(
+        "RGB letterbox + inference + decode mean {:.3} ms · p95 {:.3} ms (excludes JPEG decode, camera and pacing)",
+        mean_ms(&processing_latencies),
+        millis(percentile(&processing_latencies, 0.95))
+    );
 
     println!(
         "\nlatency   p50 {:.1} ms · p95 {:.1} ms · p99 {:.1} ms · max {:.1} ms",
@@ -271,23 +397,15 @@ fn main() -> Result<()> {
     // The number that decides whether this can run beside the control loop: one core fully busy is
     // 100%, and the NPU doing the work should leave this well under it.
     let cpu_per_frame = 1e3 * cpu / latencies.len() as f64;
+    let report_hz = reporting_hz(args.hz, latencies.len(), wall);
     println!(
         "cpu        {:.1} ms per frame — {:.0}% of one core at {:.1} Hz",
         cpu_per_frame,
         // What it would cost at the paced rate, which is the number that matters beside a 50 Hz
         // control loop. Flat out it is whatever the loop can push, and that is a different
         // question.
-        0.1 * cpu_per_frame
-            * if args.hz > 0.0 {
-                args.hz
-            } else {
-                1000.0 / cpu_per_frame
-            },
-        if args.hz > 0.0 {
-            args.hz
-        } else {
-            1000.0 / cpu_per_frame
-        }
+        0.1 * cpu_per_frame * report_hz,
+        report_hz,
     );
     if let Some(temperature) = soc_temperature() {
         println!("soc temp   {temperature:.0} °C at the end of the run");
@@ -304,5 +422,52 @@ fn main() -> Result<()> {
              wrong for a quantised model — try --threshold 0.2 before believing the model is broken."
         );
     }
+    if let Some(path) = &args.dump_outputs {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .with_context(|| format!("cannot create {}", path.display()))?;
+        let mut writer = std::io::BufWriter::new(file);
+        for value in saved_outputs {
+            writer.write_all(&value.to_le_bytes())?;
+        }
+        writer.flush()?;
+        println!("outputs {}", path.display());
+    }
+    // Profile a fresh session after releasing the timed one: never overlap two EP pools.
+    drop(model);
+    if let Some(prefix) = args.profile_prefix {
+        let mut profiled = onnx::Model::open_with_options(
+            &args.model,
+            &onnx::Options {
+                profile: Some(prefix),
+                ..options
+            },
+        )?;
+        let (_, image) = &frames[0];
+        letterbox_rgb(
+            image.as_raw(),
+            image.width() as usize,
+            image.height() as usize,
+            width,
+            &mut square,
+        );
+        profiled.infer(&square, &mut raw)?;
+        println!("profile {}", profiled.end_profiling()?);
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_out_cpu_usage_uses_wall_throughput_not_cpu_time() {
+        let hz = reporting_hz(0.0, 60, Duration::from_secs(15));
+        assert_eq!(hz, 4.0);
+        assert_eq!(0.1 * 500.0 * hz, 200.0); // 500 CPU-ms/frame at 4 fps = two busy cores.
+        assert_eq!(reporting_hz(2.0, 60, Duration::from_secs(15)), 2.0);
+    }
 }

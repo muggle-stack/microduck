@@ -22,6 +22,10 @@ designed it to be.
 
 ## Quickstart
 
+**SpaceMIT K1 / RISC-V:** use [the native development installation](../docs/robot/install-k1.md).
+The provisioning, signed-release and OTA quickstarts here still target Radxa/aarch64.
+Compiling the SDK for RISC-V does not make these board setup scripts or artifacts portable.
+
 Three ways in, in order of how much you have to type. Everything after this section is the same
 thing with the reasons attached — read it when something disagrees with you, not before.
 

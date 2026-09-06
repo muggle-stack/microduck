@@ -1,0 +1,18 @@
+# Opt-in template, NOT an installed default. Replace the device and native mode
+# with values from v4l2-ctl --list-formats-ext. /dev/video0 may be a VPU, not UVC.
+# docs/project/k1-usb-camera.md explains selected-eye and paired capture checks.
+[camera]
+backend = "usb"
+device = "/dev/v4l/by-id/REPLACE_WITH_YOUR_CAMERA-video-index0"
+input_format = "mjpeg"
+width = 1280
+height = 720
+fps = 30
+layout = "mono"
+view = "left"
+left_roi = []
+rotate = 0
+
+[media]
+camera = true
+quality = "720p30"

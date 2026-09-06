@@ -1,0 +1,45 @@
+diff --git a/mpi/uvc/uvc.c b/mpi/uvc/uvc.c
+--- a/mpi/uvc/uvc.c
++++ b/mpi/uvc/uvc.c
+@@ -90,6 +90,9 @@ typedef struct _UvcChnCtx {
+     S32 as32DmaBufFd[UVC_MAX_V4L2_BUF]; /* dma-buf fd per slot */
++    /* Base reference acquired for V4L2, not depth/application ownership.
++     * Updated under the module lock; teardown reads it after both joins. */
++    BOOL abBaseRef[UVC_MAX_V4L2_BUF];
+     BOOL bVbPoolCreated;
+@@ -330,6 +333,7 @@
+             goto err_destroy_pool;
+         }
++        pChn->abBaseRef[i] = MPP_TRUE;
+ 
+         /* get dma-buf fd for V4L2 DMABUF mode */
+@@ -384,6 +388,8 @@ err_destroy_pool:
+         if (pChn->aulVbBuf[i] != 0) {
+             VB_ModReleaseBuffer(pChn->aulVbBuf[i], MPP_ID_UVC);
++            pChn->abBaseRef[i] = MPP_FALSE;
++            pChn->aulVbBuf[i] = 0;
+         }
+@@ -440,7 +446,12 @@ static VOID uvc_v4l2_release_bufs(UvcDevCtx *pDev, UvcChnCtx *pChn) {
+             if (pChn->aulVbBuf[i] != 0) {
+-                VB_ModReleaseBuffer(pChn->aulVbBuf[i], MPP_ID_UVC);
++                /* Some slots are already back on the free list when the
++                 * recycle thread stops. Never release their absent ref. */
++                if (pChn->abBaseRef[i]) {
++                    VB_ModReleaseBuffer(pChn->aulVbBuf[i], MPP_ID_UVC);
++                    pChn->abBaseRef[i] = MPP_FALSE;
++                }
+                 pChn->aulVbBuf[i] = 0;
+@@ -592,6 +603,7 @@ static void *uvc_recycle_task(void *arg) {
+             break;
+         }
++        pChn->abBaseRef[slot] = MPP_TRUE;
+         S32 ret = uvc_v4l2_qbuf(pDev, pChn, slot);
++        if (ret != UVC_ERR_OK)
++            pChn->abBaseRef[slot] = MPP_FALSE;
+         pthread_mutex_unlock(&g_stUvcCtx.lock);
+@@ -680,6 +694,8 @@ static void *uvc_capture_task(void *arg) {
+ 
+         /* build frame info */
++        if (v4l2buf.index < pChn->u32BufCnt)
++            pChn->abBaseRef[v4l2buf.index] = MPP_FALSE;
+         VideoFrameInfo stFrame;

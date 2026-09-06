@@ -1,0 +1,10 @@
+# Audio-only K1 profile; not a complete robot/HAT/serial configuration.
+# For an existing /etc/robot/robotd.toml, merge these keys into its [audio]
+# section rather than replacing the file or adding a second [audio] table.
+# Requires deploy/audio/es8326.conf (scripts/setup-k1-audio.sh installs it).
+[audio]
+enabled = true
+device = "microduck_es8326"
+# The SDK's existing voice bank, greet and pet_detect defaults are unchanged.
+# Microphone monitoring stays opt-in: set pet_detect = true only when wanted,
+# with a valid pet_model path and a working ONNX Runtime.

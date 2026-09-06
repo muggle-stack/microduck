@@ -2434,6 +2434,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-video",
  "gstreamer-webrtc",
+ "libloading 0.8.9",
  "robotd-params",
  "serde_json",
  "tempfile",
