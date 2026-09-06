@@ -214,6 +214,103 @@ FFmpeg verification shell attempt omitted `-nostdin`, consumed part of the SSH s
 and exited 127 before the right-eye check; the corrected `-nostdin` rerun passed both byte
 comparisons. This was a verification-runner error, not an SDK capture failure.
 
+### OpenCV RVV and live-camera contention
+
+Follow-up measurements on the same K1, 2026-09-06: **253.7 ms is the detector's
+preprocessing + model invocation + NMS time, not preprocessing alone**. Acquisition,
+MJPEG decode, crop and output scaling run upstream and are outside that timer, but
+their concurrent resource use still affects inference latency.
+
+`apt show opencv-spacemit` describes the available package, not its installation status.
+The board had `libopencv-dev` / Python OpenCV `4.6.0+dfsg-13.1ubuntu1bb1` installed and
+`opencv-spacemit` **not installed**, with candidate `4.14.0-1bb3`. For this comparison,
+the candidate deb was downloaded and extracted under `target/`; a standalone C++ probe
+used its headers and an explicit library RUNPATH. No apt installation, system-library
+replacement, SDK dependency, or service change was made.
+
+The isolated 4.14 build reported `Baseline: RVV`, `Custom HAL: YES (RVV HAL (ver 0.0.1))`
+and runtime features `RVV`. The system 4.6 build reported no runtime CPU features or
+custom HAL. This is consistent with the vendor's
+[OpenCV RVV documentation](https://bianbu.spacemit.com/en/brdk/Basic_applications/3.5_High_Performance_Computing_Library/3.5.1_opencv_rvv/),
+but the following timings are **this board's measurements**, not the documentation's
+illustrative benchmark.
+
+All probes used the same saved selected-left **1280×720 UYVY** frame, with rotation 0,
+nearest-neighbour resize to 320×180 and padding value 114 to make 320×320 RGB bytes.
+The Rust probe called the SDK's compiled `duck_detect::letterbox_from_uyvy` directly.
+The C++ probe used full-frame `cvtColor(COLOR_YUV2RGB_UYVY)`, `resize(INTER_NEAREST)` and
+`copyMakeBorder`, reusing its Mats. It ran on CPU 4 with `cv::setNumThreads(1)`.
+The Rust probe used one calling thread inside the same hard four-CPU scope described
+below. The camera was off; each microbenchmark discarded 10 warm-ups and measured
+100 calls. These are exploratory function comparisons, not an accepted SDK speedup.
+
+| RGB-byte preprocessing path | Mean / P95 (ms) |
+| --- | ---: |
+| Existing fused Rust implementation | 3.020 / 3.046 |
+| SpaceMIT OpenCV 4.14: three operations | 4.537 / 4.612 |
+| System OpenCV 4.6: same three operations | 14.339 / 14.580 |
+
+SpaceMIT OpenCV is **3.16× faster than system OpenCV for these operations**, but that
+does not make this direct replacement faster than the existing SDK implementation.
+The latter only converts the 57,600 sampled pixels that survive the resize; full-frame
+OpenCV color conversion processes 921,600 pixels before resizing. The comparison does
+not exhaust possible OpenCV algorithms or upstream capture optimizations. These rows
+exclude JPEG decode and HWC RGB → NCHW float tensor packing.
+
+Exactness: both OpenCV variants differed from the SDK reference in **2,014 / 307,200
+RGB bytes**, with maximum absolute byte difference 1. This is not bit-identical;
+neither detection-accuracy equivalence nor a precision tradeoff was approved. No
+replacement was integrated, and the original preprocessing remains the default.
+
+To separate camera load from image-content changes, a second experiment repeatedly
+processed the **same saved frame and unchanged floating-point model**, first without
+capture, then while a separate SDK `camera-check` continuously acquired/decoded/scaled
+the real 4000×1200 camera into selected-left 720p, then again after capture stopped.
+Both processes in the loaded run shared **one** `AllowedCPUs=0-2,4` cgroup; the EP had
+three workers with affinity `0;1;2`, caller CPU 4, FP16 epilogue disabled. Each phase
+discarded five model warm-ups and measured 30 inferences, unpaced.
+
+| Fixed-frame stage, mean ms | Camera off | Camera running | Camera stopped again |
+| --- | ---: | ---: | ---: |
+| Fused UYVY → letterboxed RGB bytes | 3.064 | 3.027 | 3.075 |
+| `Model::infer`: tensor packing + ORT + output checks/copy | 123.157 | 234.919 | 125.415 |
+| NMS | 0.021 | 0.021 | 0.021 |
+| Total | 126.242 | 237.967 | 128.510 |
+| Total P95 | 131.286 | 249.051 | 133.366 |
+
+The background capture completed all 90 requested frames in 24.22 s including startup,
+with increasing timestamps, and released the device afterward. Its aggregate rate is
+not a loaded-only throughput benchmark: the fixed-frame inference process ran during
+only part of that capture. All three fixed-frame RGB references matched (`cmp` exit 0),
+SHA-256 `96412bf6ccef29ab3745ca4a3748053ee1fec48727f252380af6751c7ea0ea59`.
+This is a controlled contention diagnostic, not a replacement for live SDK latency
+acceptance or a claim of bit-identical model outputs across runs.
+
+Independently, the **same** 20-frame live ORT-profiled run reported above averaged
+248.481 ms for the detector, of which the SpaceMIT fused node averaged **238.397 ms**
+after excluding its five warm-ups: about 96% was inside the EP node, with only 10.084 ms
+outside it. Do not subtract that node average from the separate unprofiled 60-frame
+result. The controlled off/on/off test supports concurrent capture-resource contention
+as the main reason for the offline/live gap; it does not distinguish CPU scheduling,
+memory/cache contention, or individual decoder/converter costs.
+
+The next useful optimization target is therefore the **upstream full-resolution
+MJPEG decode/conversion/scaling workload and its scheduling**, not replacing the
+already ~3 ms detector resize/color loop. Reducing acquisition work or using a suitable
+hardware decoder still requires separate measurement and pixel/accuracy checks; no
+such acceleration, stable dual-eye 2 Hz result, or new throughput claim is made here.
+
+Probe sources, binaries, complete OpenCV build information and logs are retained at
+`target/k1-opencv-check-20260906.gBuOpC/` on K1. Relevant files are
+`preprocess-check.rs`, `opencv-check.cpp`, `rust-offline.log`, `rust-with-capture.log`,
+`rust-offline-repeat.log`, `opencv-spacemit.log`, `opencv-system.log` and
+`capture-load.jsonl`. A copy excluding the deb/extracted libraries is at
+`target/k1-opencv-check-20260906.dbfOVP/` on Mac. The downloaded deb SHA-256 is
+`c74de8b27fdac8193a1b8777826fac7a20727fa04e5e2c69c9d41f8607d12f4e`.
+The first standalone Rust link attempt lacked the host proc-macro dependency directory
+and failed with E0463 (`rust-build.log`); adding both target and host dependency search
+paths passed (`rust-build-fixed.log`). That diagnostic build error is retained.
+
 ### Exactness and acceptance boundaries
 
 Software regression on this change:

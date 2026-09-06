@@ -337,6 +337,13 @@ inferences ran at approximately 2 Hz: preprocessing + inference + NMS mean **253
 node with no CPU-provider compute nodes. Dual-eye serial inference was only 1.96 pairs/s in a
 short test, so stable dual-eye 2 Hz is not accepted. No weights/precision defaults were changed.
 
+Follow-up profiling attributes about 96% of the profiled live detector time to the EP
+node. The existing fused RGB-byte preprocessing costs only ~3 ms; isolated SpaceMIT
+OpenCV takes ~4.5 ms for a direct three-operation replacement. A fixed-frame off/on/off
+camera-load test moves the model invocation from 123 → 235 → 125 ms under the same hard
+four-CPU budget, pointing to concurrent capture-resource contention rather than that
+preprocessing loop. No OpenCV package was installed or preprocessing default changed.
+
 See [USB camera configuration, exactness, measurements and file inventory](k1-usb-camera.md).
 Only one physical packed-stereo device was tested; the mono software path used its left ROI.
 This adds neither stereo depth/calibration nor synchronized independent USB devices.
