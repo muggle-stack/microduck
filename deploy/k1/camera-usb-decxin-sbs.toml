@@ -1,0 +1,22 @@
+# Opt-in profile for the tested 1bcf:2d50 DECXIN USB camera, not an installed default.
+# Native MJPEG is 4000x1200@30; that is NOT the measured software-decoded frame rate.
+# The two 1920x1200 ROIs below are candidates from visual inspection of one frame:
+# 160 leading columns appear outside the two views. Confirm with the camera vendor
+# and calibration captures before using geometry for robotics. No depth calibration.
+[camera]
+backend = "usb"
+device = "/dev/v4l/by-id/usb-DECXIN_DECXIN_Camera_01.00.00-video-index0"
+input_format = "mjpeg"
+width = 4000
+height = 1200
+fps = 30
+layout = "stereo_sbs"
+view = "left"
+left_roi = [160, 0, 1920, 1200]
+right_roi = [2080, 0, 1920, 1200]
+rotate = 0
+
+[media]
+camera = true
+# Aspect-preserving scaled/letterboxed selected eye; no 30fps throughput promise.
+quality = "720p30"

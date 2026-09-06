@@ -54,7 +54,7 @@ sh scripts/k1-test.sh
 ```
 
 This runs the workspace's release-mode tests on the RISC-V target, builds the board binaries,
-and runs the seven daemons plus `robotctl` with `--help` to check their executable loading.
+and runs the seven daemons, `robotctl`, and `camera-check` with `--help` to check executable loading.
 The existing robotd integration tests use `--fake`, exercising IPC and the update health gate
 without a motor bus. The script does not install systemd services, run provisioning scripts,
 change networking, or enable motors.
@@ -320,13 +320,34 @@ tested as three workers on 0-2 plus caller CPU 4; `taskset` alone does not enfor
 budget because the EP rebinds its caller. The integration report includes reproducible cpuset
 commands, the failed probes, and correction of the earlier standalone experiment's core labels.
 
+## USB camera: mono and packed stereo
+
+The opt-in USB backend now feeds the SDK's existing selected-eye media/detection path.
+`camera-check` validates the same source and detector without the still-missing WebRTC plugin.
+The existing Radxa/IMX219 source remains the default; K1 CSI/ISP integration is separate.
+
+On the connected DECXIN UVC camera (MJPEG 4000×1200 @30 advertised), native SDK tests passed
+for left/right selection, mono cropping, paired extraction, invalid-mode/device handling and
+camera release. The selected 1280×720 software path measured 5.3–5.4 fps, and two native
+1920×1200 ROIs measured 8.81 pairs/s: **neither is a 30 fps decoded-video claim**.
+
+With a hard four-CPU budget and the existing floating-point SpaceMIT EP model, 60 selected-eye
+inferences ran at approximately 2 Hz: preprocessing + inference + NMS mean **253.7 ms**, P95
+**264.5 ms**, while capture continued. A separate live ORT profile showed the SpaceMIT fused
+node with no CPU-provider compute nodes. Dual-eye serial inference was only 1.96 pairs/s in a
+short test, so stable dual-eye 2 Hz is not accepted. No weights/precision defaults were changed.
+
+See [USB camera configuration, exactness, measurements and file inventory](k1-usb-camera.md).
+Only one physical packed-stereo device was tested; the mono software path used its left ROI.
+This adds neither stereo depth/calibration nor synchronized independent USB devices.
+
 ## Outside this software check
 
 - Real Dynamixel half-duplex UART, 15 servos and IMU feedback.
 - CSI camera/sensor/ISP configuration and exposure control.
 - K1 H.264 encoder selection and the missing `webrtcsink` runtime plugin.
-- Labelled detector validation, live camera frames and simultaneous vision/control/media load.
-  The Rust EP backend is integrated and offline-tested; INT8 is not the SDK default.
+- Labelled detector validation and simultaneous vision/control/media load. Live USB frames
+  now reach the integrated Rust EP detector as described above; INT8 is not the SDK default.
 - Real ToF, Bluetooth controller and gamepad bring-up; ES8326 audio is covered above,
   but microphone/enclosure-specific petting accuracy is not.
 - RISC-V provisioning, signed release packaging, OTA assets and CI. The inherited release

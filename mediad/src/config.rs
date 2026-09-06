@@ -18,28 +18,14 @@ pub fn default_path() -> PathBuf {
     PathBuf::from(robotd_params::DEFAULT_PATH)
 }
 
-/// Read the file, or fall back to the built-in defaults.
-///
-/// **A file this daemon cannot read is not a reason to have no video.** `robotd` refuses to start
-/// on a broken params file — that is the loud signal, and it is the daemon whose control loop the
-/// file configures. A robot in that state is already down, and its camera is how somebody looks at
-/// it. So this warns, names the file, and streams the defaults rather than joining the outage.
+/// Read the file, refusing invalid configuration before any camera is opened.
+/// A broken USB configuration must not fall back to Rockchip's /dev/video0 and sensor writes.
 ///
 /// A *missing* file is not even a warning at the default path: an unprovisioned board has none and
 /// streams its camera at 720p30 like every other. A path named on the command line must exist,
 /// which is `Params::load`'s own rule and the reason `explicit` is passed through.
-pub fn load(path: &Path, explicit: bool) -> Params {
-    match Params::load(path, explicit) {
-        Ok(params) => params,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                path = %path.display(),
-                "unusable params file; streaming the built-in defaults"
-            );
-            Params::default()
-        }
-    }
+pub fn load(path: &Path, explicit: bool) -> Result<Params, robotd_params::ParamsError> {
+    Params::load(path, explicit)
 }
 
 #[cfg(test)]
@@ -58,7 +44,7 @@ mod tests {
     fn a_quality_in_the_file_is_what_gets_streamed() {
         let dir = tempfile::tempdir().unwrap();
         let path = write(dir.path(), "[media]\nquality = \"360p30\"\n");
-        let media = load(&path, true).media;
+        let media = load(&path, true).unwrap().media;
         assert_eq!(media.quality.size(), (640, 360));
         assert_eq!(media.quality.fps(), 30);
         assert_eq!(media.bitrate_resolved(), media.quality.default_bitrate());
@@ -69,20 +55,20 @@ mod tests {
     #[test]
     fn a_missing_file_streams_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let media = load(&dir.path().join("absent.toml"), false).media;
+        let media = load(&dir.path().join("absent.toml"), false).unwrap().media;
         assert_eq!(media.quality, MediaParams::default().quality);
         assert!(media.camera);
     }
 
-    /// The claim the doc comment makes, pinned: a params file `robotd` will not start on still
-    /// leaves a camera to look at the robot with.
+    /// No implicit backend/device fallback after a typo or a missing explicit file.
     #[test]
-    fn a_broken_file_still_streams() {
+    fn a_broken_file_or_missing_explicit_file_cannot_select_another_camera() {
         let dir = tempfile::tempdir().unwrap();
         let path = write(dir.path(), "[media\nquality = ");
-        let media = load(&path, true).media;
-        assert_eq!(media.quality, MediaParams::default().quality);
-        assert!(media.camera);
+        assert!(load(&path, true).is_err());
+        assert!(load(&dir.path().join("absent.toml"), true).is_err());
+        let path = write(dir.path(), "[camera]\nbackend = 'usb'\n");
+        assert!(load(&path, true).is_err());
     }
 
     /// A `[media]` section from a build that had a key this one does not is ignored key by key,
@@ -95,7 +81,7 @@ mod tests {
             dir.path(),
             "[media]\nquality = \"720p15\"\nchroma_subsampling = \"4:4:4\"\n",
         );
-        let media = load(&path, true).media;
+        let media = load(&path, true).unwrap().media;
         assert_eq!(media.quality.fps(), 15);
     }
 }

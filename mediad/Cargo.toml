@@ -1,5 +1,6 @@
 [package]
 name = "mediad"
+default-run = "mediad"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

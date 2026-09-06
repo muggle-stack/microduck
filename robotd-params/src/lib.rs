@@ -16,8 +16,10 @@
 //! test that walks [`Params`]'s own serialization, so a new section cannot be added without
 //! the registry (and therefore the editor) learning about it.
 
+pub mod camera;
 pub mod edit;
 pub mod registry;
+pub use camera::{CameraBackend, CameraFormat, CameraLayout, CameraParams, CameraRect, CameraView};
 
 use std::path::{Path, PathBuf};
 
@@ -53,6 +55,7 @@ pub const DEFAULT_PATH: &str = "/etc/robot/robotd.toml";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Params {
+    pub camera: CameraParams,
     pub bus: Bus,
     pub control: Control,
     pub update_gate: UpdateGate,
@@ -1666,6 +1669,8 @@ impl Default for UpdateGate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParamsError {
+    #[error("{path}: camera: {reason}")]
+    Camera { path: String, reason: String },
     #[error("{path}: detect: {reason}")]
     Detect { path: String, reason: String },
     #[error("reading {path}: {source}")]
@@ -1762,6 +1767,12 @@ impl Params {
     /// Reject values that would produce a loop that cannot work, at startup rather than as
     /// a division by zero three seconds later.
     fn validate(&self, path: &Path) -> Result<(), ParamsError> {
+        self.camera
+            .validate()
+            .map_err(|reason| ParamsError::Camera {
+                path: path.display().to_string(),
+                reason,
+            })?;
         let detect_error = |reason: &str| ParamsError::Detect {
             path: path.display().to_string(),
             reason: reason.into(),
@@ -1862,6 +1873,11 @@ fn without_unknown_keys(text: &str) -> Option<(Result<Params, toml::de::Error>, 
             // decision someone made, not four mistakes.
             ignored.push(format!("[{section}]"));
             return false;
+        }
+        // Camera keys select physical hardware and geometry. Keep this new section strict:
+        // pruning a misspelt backend/ROI could select a different device or the wrong eye.
+        if section == "camera" {
+            return true;
         }
         fields.retain(|key, _| {
             if registry::entry_for(&format!("{section}.{key}")).is_some() {
@@ -2684,6 +2700,37 @@ mod tests {
         assert_eq!(params.audio.capture_device(), "microduck_es8326");
         // Selecting a codec must not opt the operator into microphone monitoring.
         assert!(!params.audio.pet_detect_resolved(params.policy.mode));
+    }
+
+    #[test]
+    fn usb_profiles_round_trip_through_the_real_loader() {
+        let dir = tempfile::tempdir().unwrap();
+        for (text, layout) in [
+            (
+                include_str!("../../deploy/k1/camera-usb-mono.toml"),
+                CameraLayout::Mono,
+            ),
+            (
+                include_str!("../../deploy/k1/camera-usb-decxin-sbs.toml"),
+                CameraLayout::StereoSbs,
+            ),
+        ] {
+            let params = Params::load(&write(dir.path(), text), true).unwrap();
+            assert_eq!(params.camera.backend, CameraBackend::Usb);
+            assert_eq!(params.camera.layout, layout);
+            assert_eq!(params.camera.rotation(), 0);
+            assert!(
+                !params.detect.enabled,
+                "camera profile must not enable inference implicitly"
+            );
+            assert_eq!(params.media.quality, Quality::Q720p30);
+        }
+        for text in [
+            "[camera]\nbacked = 'usb'\ndevice = '/dev/test'\n",
+            "[camera]\nbackend = 'usb'\ndevice = '/dev/test'\nleft_rol = [0,0,640,720]\n[future_section]\nignored = true\n",
+        ] {
+            assert!(Params::load(&write(dir.path(), text), true).is_err());
+        }
     }
 
     /// An unprovisioned board must still come up. A daemon that refuses to start because a

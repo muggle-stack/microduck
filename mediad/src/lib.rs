@@ -17,6 +17,7 @@
 //! signalling server in this process, `mpph264enc` in front of it, and a `control` datachannel per
 //! peer wired to [`session::run`].
 
+pub mod camera;
 pub mod config;
 pub mod producer;
 pub mod route;

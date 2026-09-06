@@ -28,7 +28,7 @@ cargo k1 --locked --bins -j "$JOBS"
 
 # --help exercises the executable loader, not a serial port, radio, or camera.
 BIN="${CARGO_TARGET_DIR:-target}/$TARGET/release"
-for name in robotd robotctl updaterd configd btd padd mediad tofd; do
+for name in robotd robotctl updaterd configd btd padd mediad tofd camera-check; do
     # Some daemons publish identity before parsing --help; never replace a live
     # service's /run identity with the binary this script is checking.
     DUCK_RUNTIME_DIR="$BIN/k1-cli-runtime" timeout 15 "$BIN/$name" --help >/dev/null

@@ -54,7 +54,7 @@ pub use robotd_params::edit::{Edit, Model, Row, bind_pad, pad_bindings, render, 
 /// rather than assumed.
 fn unit_for(section: &str) -> &'static str {
     match section {
-        "media" | "detect" => "mediad",
+        "media" | "detect" | "camera" => "mediad",
         // `padd` reads the bindings, and `robotd` never sees them. Offering a robotd restart for
         // a button change would drop motor control — putting a standing robot on the floor — to
         // apply a setting it does not read.
@@ -762,6 +762,8 @@ mod tests {
     /// wrong daemon is how somebody edits a value three times and swears it does nothing.
     #[test]
     fn the_section_decides_which_daemon_restarts() {
+        let camera = vec!["camera.view".to_owned(), "camera.device".to_owned()];
+        assert_eq!(units_to_restart(&camera), vec!["mediad"]);
         let detect = vec!["detect.enabled".to_owned()];
         assert_eq!(units_to_restart(&detect), vec!["mediad"]);
 

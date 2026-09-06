@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use duck_detect::{Detection, Turn, decode, letterbox_from_uyvy};
 use tokio::sync::broadcast;
 
-use crate::pipeline::Frames;
+use crate::pipeline::{Frame, Frames};
 
 /// What one look found, and what it cost.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +30,7 @@ pub struct Sighting {
     pub width: u32,
     pub height: u32,
     pub found: Vec<Detection>,
-    /// Inference plus decode, in milliseconds — on the frame, not averaged.
+    /// Preprocessing, inference and box decode, in milliseconds — on this frame, not averaged.
     pub took_ms: f64,
 }
 
@@ -112,6 +112,73 @@ impl Backend {
             Self::Npu(model) => model.infer(frame, out),
             Self::Onnx(model) => model.infer(frame, out),
         }
+    }
+}
+
+/// The same synchronous image-to-sighting path used by the daemon and camera-check.
+/// No alternate preprocessing, model precision, or execution-provider defaults.
+pub struct ImageDetector {
+    backend: Backend,
+    size: usize,
+    square: Vec<u8>,
+    raw: Vec<f32>,
+}
+
+impl ImageDetector {
+    pub fn open(model: &Path, options: &duck_detect::onnx::Options) -> Result<Self> {
+        let backend = Backend::open(model, options)?;
+        let (height, width, channels) = backend.input();
+        anyhow::ensure!(
+            channels == 3 && width == height && width > 0,
+            "this detector wants a square RGB model, got {width}×{height}×{channels}"
+        );
+        Ok(Self {
+            backend,
+            size: width,
+            square: Vec::new(),
+            raw: Vec::new(),
+        })
+    }
+
+    pub fn infer(&mut self, frame: &Frame, turn: Turn, threshold: f32) -> Result<Sighting> {
+        anyhow::ensure!(
+            frame.format == crate::pipeline::CAPTURE_FORMAT,
+            "detector requires UYVY"
+        );
+        anyhow::ensure!(
+            frame.width > 0 && frame.width.is_multiple_of(2) && frame.height > 0,
+            "invalid UYVY frame dimensions"
+        );
+        let len = (frame.width as usize)
+            .checked_mul(frame.height as usize)
+            .and_then(|n| n.checked_mul(2))
+            .context("UYVY frame size overflow")?;
+        anyhow::ensure!(
+            frame.data.len() == len,
+            "detector requires tightly packed UYVY"
+        );
+        anyhow::ensure!(
+            threshold.is_finite() && (0.0..=1.0).contains(&threshold),
+            "invalid detection threshold"
+        );
+        let started = Instant::now();
+        let fit = letterbox_from_uyvy(
+            &frame.data,
+            frame.width as usize,
+            frame.height as usize,
+            self.size,
+            turn,
+            &mut self.square,
+        );
+        self.backend.infer(&self.square, &mut self.raw)?;
+        let found = decode(&self.raw, fit, threshold, 0.5);
+        let (width, height) = turn.upright(frame.width as usize, frame.height as usize);
+        Ok(Sighting {
+            width: width as u32,
+            height: height as u32,
+            found,
+            took_ms: started.elapsed().as_secs_f64() * 1e3,
+        })
     }
 }
 
@@ -211,12 +278,7 @@ pub fn spawn_with_options(
     turn: Turn,
     options: &duck_detect::onnx::Options,
 ) -> Result<Detector> {
-    let mut backend = Backend::open(model, options)?;
-    let (height, width, channels) = backend.input();
-    anyhow::ensure!(
-        channels == 3 && width == height,
-        "this detector wants a square RGB model, got {width}×{height}×{channels}"
-    );
+    let mut engine = ImageDetector::open(model, options)?;
 
     let (sightings, _) = broadcast::channel(8);
     let detector = Detector {
@@ -231,8 +293,6 @@ pub fn spawn_with_options(
     std::thread::Builder::new()
         .name("duck-detect".into())
         .spawn(move || {
-            let mut square = Vec::new();
-            let mut raw = Vec::new();
             let mut next = Instant::now();
             let mut last_error: Option<String> = None;
             // Since the last report, not for ever: what matters is whether the tee is quiet *now*.
@@ -299,22 +359,10 @@ pub fn spawn_with_options(
                     return;
                 }
 
-                let started = Instant::now();
-                // One pass from the tee's 4:2:2 straight into the model's square. Converting the
-                // whole 720×1280 frame and shrinking it afterwards cost 345 ms of a 407 ms look.
-                let fit = letterbox_from_uyvy(
-                    &frame.data,
-                    frame.width as usize,
-                    frame.height as usize,
-                    width,
-                    turn,
-                    &mut square,
-                );
-                match backend.infer(&square, &mut raw) {
-                    Ok(()) => {
-                        let found = decode(&raw, fit, threshold, 0.5);
+                match engine.infer(&frame, turn, threshold) {
+                    Ok(sighting) => {
                         looks.fetch_add(1, Ordering::Relaxed);
-                        if !found.is_empty() {
+                        if !sighting.found.is_empty() {
                             seen.fetch_add(1, Ordering::Relaxed);
                         }
                         last_error = None;
@@ -322,15 +370,8 @@ pub fn spawn_with_options(
                         // no console open, and it is not a reason to stop looking.
                         // Upright, because that is the space the boxes are in — a consumer
                         // scaling them against the *camera's* dimensions would have them sideways.
-                        let (upright_w, upright_h) =
-                            turn.upright(frame.width as usize, frame.height as usize);
-                        took_ms = started.elapsed().as_secs_f64() * 1e3;
-                        let _ = sightings.send(Arc::new(Sighting {
-                            width: upright_w as u32,
-                            height: upright_h as u32,
-                            found,
-                            took_ms,
-                        }));
+                        took_ms = sighting.took_ms;
+                        let _ = sightings.send(Arc::new(sighting));
                     }
                     Err(error) => {
                         // Once per distinct message: a failure that repeats at 2 Hz would be 7000

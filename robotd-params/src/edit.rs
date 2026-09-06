@@ -676,7 +676,12 @@ mod tests {
         let m = model("");
         for row in m.rows() {
             assert!(!row.overridden(), "{}", row.entry.key);
-            assert!(!row.effective().is_empty(), "{}", row.entry.key);
+            // USB requires an explicit device; an empty default deliberately opens nothing.
+            if row.entry.key == "camera.device" {
+                assert_eq!(row.effective(), "");
+            } else {
+                assert!(!row.effective().is_empty(), "{}", row.entry.key);
+            }
         }
         // Spot-check values against the daemon's documented defaults.
         let rows = m.rows();
@@ -1030,6 +1035,7 @@ mod tests {
         assert_eq!(
             s,
             vec![
+                "camera",
                 "bus",
                 "control",
                 "update_gate",

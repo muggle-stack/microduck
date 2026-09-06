@@ -193,6 +193,11 @@ pub enum Source {
     Test,
     /// The head camera, through the rkisp capture path.
     Camera(Camera),
+    /// One explicit USB device; optionally selects an eye from a packed stereo frame.
+    Usb {
+        camera: robotd_params::CameraParams,
+        quality: robotd_params::Quality,
+    },
 }
 
 /// The head camera, and the two things it will not work without.
@@ -404,6 +409,13 @@ pub fn start(
             src
         }
         Source::Camera(camera) => camera_source(camera, fps)?,
+        Source::Usb { camera, quality } => {
+            anyhow::ensure!(
+                (width, height, fps) == (quality.width(), quality.height(), quality.fps()),
+                "USB output quality differs from pipeline settings"
+            );
+            crate::camera::usb::source(camera, Some(*quality))?.upcast()
+        }
     };
 
     // Pinned rather than negotiated, because both branches of the tee depend on the answer, and a
@@ -700,28 +712,15 @@ fn wire_frames(appsink: &gst_app::AppSink, frames: Frames, width: u32, height: u
                 if !frames.take_request() {
                     return Ok(gst::FlowSuccess::Ok);
                 }
-                let Some(buffer) = sample.buffer() else {
-                    return Ok(gst::FlowSuccess::Ok);
-                };
-                // `UYVY` is a single plane, so this maps without merging anything — unlike the
-                // `NM12` this used to carry, where mapping silently copied two non-contiguous
-                // planes into one block. The `to_vec` below is still a copy, and still the only
-                // one on this branch.
-                let Ok(map) = buffer.map_readable() else {
-                    // A buffer that will not map is not worth failing the pipeline over — the next
-                    // one is a frame away, and this branch is advisory by design. The request has
-                    // been taken by now, so the reader waits out its timeout rather than being
-                    // answered with nothing; a map that fails twice running is a pipeline in
-                    // trouble, not a frame to retry for.
-                    tracing::debug!("a raw frame would not map");
-                    return Ok(gst::FlowSuccess::Ok);
-                };
-                frames.deliver(Frame {
-                    width,
-                    height,
-                    format: CAPTURE_FORMAT,
-                    data: map.as_slice().to_vec(),
-                });
+                // Honor negotiated stride/offset, but copy only on demand as before.
+                // A driver may pad rows; consumers require tightly packed UYVY.
+                match crate::camera::usb::frame_from_sample(&sample) {
+                    Ok(frame) if (frame.width, frame.height) == (width, height) => {
+                        frames.deliver(frame);
+                    }
+                    Ok(_) => tracing::warn!("raw frame geometry differs from the pipeline"),
+                    Err(error) => tracing::debug!(%error, "a raw frame could not be read"),
+                }
 
                 Ok(gst::FlowSuccess::Ok)
             })
