@@ -68,7 +68,7 @@ cd /root/workspace/microduck
 sh scripts/build-k1-camera.sh /root/workspace/spacemit-sdk/components/multimedia/mpp
 export MICRODUCK_K1_CAMERA_LIB=/root/workspace/microduck/target/k1-camera/libmicroduck_k1_camera.so
 export PATH=/opt/microduck-rust-1.89.0/bin:$PATH
-cargo k1 --locked -p mediad --bins -j 2
+cargo k1 --locked --bins -j 2
 
 timeout 30 target/riscv64gc-unknown-linux-gnu/release/camera-check \
   --config deploy/k1/camera-usb-decxin-mpp.toml --frames 30
@@ -78,6 +78,10 @@ The template configures the camera only. For inference retain the existing verif
 `[detect]` ONNX/SpaceMIT EP settings and model path, then add `--detect --hz 2` to
 the check. See [detector configuration and hard CPU-budget command](k1-usb-camera.md#configuration-and-headless-check).
 The bridge does not turn an upstream `.rknn` model into an EP-compatible ONNX model.
+Build all SDK binaries before using the new shared config with other daemons:
+`robotctl`, `robotd` and `padd` also consume `robotd-params`. A quick `-p mediad`
+build is enough for isolated camera checks, but leaves those old executables unaware
+of the new strict `camera.acceleration` field. No running service is replaced here.
 
 The optional second build argument must be a **dedicated subdirectory of this
 workspace's `target/`**. `K1_BUILD_JOBS` defaults to 2. Cached source revision and
@@ -152,6 +156,12 @@ test was then explicitly run and passed: three open/read/drop cycles in the same
 Rust process, 15 frames total, in 6.21 s. Left/right, mono-via-ROI and physical
 90°/180°/270° SDK capture all passed with increasing PTS. Missing bridge and
 unsupported native 1280×720 mode failed explicitly; no device remained open.
+The native full-workspace `--bins` build then passed (14m46s), including all
+shared-config consumers. All nine CLI loader checks passed: `robotd`, `robotctl`,
+`updaterd`, `configd`, `btd`, `padd`, `mediad`, `tofd`, `camera-check`. Their
+`--help` checks used an isolated runtime directory, not `/run`; no hardware control
+service was started or installed. The new camera key is present in the rebuilt
+`robotctl`, `robotd` and `padd` executables.
 
 For a fair software comparison, pin **pixel-aspect-ratio=1/1 at both ends** of
 `videoscale`, as the production SDK does. Omitting it allows GStreamer to negotiate
@@ -195,12 +205,13 @@ by whole-command wall time, **including startup/warm-up**, where 100% means one 
 | MPP + OpenCV | 187.411 / 207.695 ms | 153% | 53.72 / 34.92 s |
 | Software repeat | 244.943 / 251.096 ms | 229% | 80.49 / 35.05 s |
 | MPP final regression, diagnostics routed to stderr | 205.659 / 215.716 ms | 165% | 57.90 / 34.91 s |
+| MPP, final full-workspace build | 192.812 / 209.435 ms | 155% | 54.29 / 34.92 s |
 
 The meaningful camera improvement is throughput and reduced CPU pressure. The
 live detector improves by about **38–58 ms (16–24%)**, not an order of magnitude;
 it still does not reach the previous offline ~125 ms model-invocation baseline.
 The hardware runs vary between **187–206 ms**; the variation's cause was not isolated,
-so 187 ms is not a guaranteed latency. All four maintained ~2 Hz consumption with increasing PTS. No servo, audio,
+so 187 ms is not a guaranteed latency. All five maintained ~2 Hz consumption with increasing PTS. No servo, audio,
 encoder or WebRTC workload was active. Run-start temperatures across the whole
 test sequence were 40–50°C. The headless tool opens the EP before the camera;
 its main thread is bound to CPU 4, while the hard cgroup bounds every child thread.
