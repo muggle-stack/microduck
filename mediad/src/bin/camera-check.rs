@@ -191,18 +191,18 @@ fn run(args: Args) -> anyhow::Result<()> {
             let report = json!({"event":"frame", "index":index - args.warmup,
                 "source_pts_ns": acquired.pts_ns, "buffer_offset":acquired.sequence, "views":reports});
             println!("{report}");
-            if index == args.warmup {
-                if let Some(dir) = &args.dump_dir {
-                    if args.both_eyes {
-                        write_new(dir.join("native.uyvy"), &acquired.image.data)?;
-                    }
-                    write_new(
-                        dir.join("frame.json"),
-                        serde_json::to_string_pretty(&json!({
-                        "camera":camera, "quality":params.media.quality, "physical_rotation":rotation.degrees(), "frame":report} ))?
-                        .as_bytes(),
-                    )?;
+            if index == args.warmup
+                && let Some(dir) = &args.dump_dir
+            {
+                if args.both_eyes {
+                    write_new(dir.join("native.uyvy"), &acquired.image.data)?;
                 }
+                write_new(
+                    dir.join("frame.json"),
+                    serde_json::to_string_pretty(&json!({
+                        "camera":camera, "quality":params.media.quality, "physical_rotation":rotation.degrees(), "frame":report} ))?
+                    .as_bytes(),
+                )?;
             }
         }
     }
