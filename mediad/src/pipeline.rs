@@ -751,10 +751,8 @@ pub fn start(
     watch_bus(&pipeline);
 
     if let Err(error) = pipeline.set_state(gst::State::Playing) {
-        if k1_csi {
-            if let Err(cleanup) = stop_k1(pipeline) {
-                tracing::error!(error = %format!("{cleanup:#}"), "K1 startup cleanup failed");
-            }
+        if k1_csi && let Err(cleanup) = stop_k1(pipeline) {
+            tracing::error!(error = %format!("{cleanup:#}"), "K1 startup cleanup failed");
         }
         return Err(error).context("the pipeline would not start");
     }
