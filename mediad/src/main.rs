@@ -227,6 +227,10 @@ fn main() -> ExitCode {
                     camera,
                     quality: media.quality,
                 },
+                robotd_params::CameraBackend::SpacemitCsi => mediad::pipeline::Source::SpacemitCsi {
+                    camera,
+                    quality: media.quality,
+                },
             }
         } else {
             mediad::pipeline::Source::Test
@@ -288,6 +292,10 @@ fn main() -> ExitCode {
             (mediad::pipeline::Source::Test, _) => None,
             (mediad::pipeline::Source::Usb { .. }, _) => {
                 tracing::info!("USB exposure/white balance are managed by UVC controls; no Rockchip sensor controls are written");
+                None
+            }
+            (mediad::pipeline::Source::SpacemitCsi { .. }, _) => {
+                tracing::info!("K1 CSI exposure/white balance are managed by the vendor ISP profile; no Rockchip sensor controls are written");
                 None
             }
         };

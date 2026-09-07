@@ -1,4 +1,4 @@
-//! Bounded USB capture/detection check, without WebRTC, audio, or a robot bus.
+//! Bounded USB/K1 CSI capture and detection, without WebRTC, audio, or a robot bus.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -7,7 +7,7 @@ use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(
-    about = "Check the SDK USB mono/SBS camera path without WebRTC",
+    about = "Check SDK USB mono/SBS or SpaceMIT CSI capture and detection without WebRTC",
     version
 )]
 struct Args {
@@ -25,7 +25,7 @@ struct Args {
     /// Otherwise use mediad's selected-eye, aspect-preserving media output path.
     #[arg(long)]
     both_eyes: bool,
-    /// Physically rotate the selected output by camera.rotate (V2D on K1).
+    /// Physically rotate by camera.rotate (V2D for accelerated USB; videoflip for CSI).
     /// Normally only the detector rotates; native SBS extraction stays unrotated.
     #[arg(long, conflicts_with = "both_eyes")]
     flip_in_pipeline: bool,
@@ -44,12 +44,15 @@ struct Args {
     /// Create a NEW directory and save the first measured UYVY frame/views plus metadata.
     #[arg(long)]
     dump_dir: Option<PathBuf>,
+    /// Write SDK JSONL to a NEW file, separate from vendor camera logs on stdout.
+    #[arg(long)]
+    report: Option<PathBuf>,
 }
 
 #[cfg(target_os = "linux")]
 fn run(args: Args) -> anyhow::Result<()> {
     use anyhow::{Context, ensure};
-    use mediad::camera::usb::Capture;
+    use mediad::camera::Capture;
     use mediad::detect::ImageDetector;
     use robotd_params::{CameraBackend, CameraLayout, CameraView, Params};
     use serde_json::json;
@@ -63,8 +66,11 @@ fn run(args: Args) -> anyhow::Result<()> {
     let params = Params::load(&args.config, true)?;
     let camera = &params.camera;
     ensure!(
-        camera.backend == CameraBackend::Usb,
-        "camera-check requires camera.backend = 'usb'"
+        matches!(
+            camera.backend,
+            CameraBackend::Usb | CameraBackend::SpacemitCsi
+        ),
+        "camera-check requires camera.backend = 'usb' or 'spacemit_csi'"
     );
     ensure!(
         !args.both_eyes || camera.layout == CameraLayout::StereoSbs,
@@ -92,6 +98,19 @@ fn run(args: Args) -> anyhow::Result<()> {
         Some(ImageDetector::open(&model, &options)?)
     } else {
         None
+    };
+    // Vendor CSI libraries print directly to C stdout, outside Rust's log bridge.
+    // A separate optional sink preserves JSONL without redirecting global FDs.
+    let mut report_output: Box<dyn Write> = if let Some(path) = &args.report {
+        Box::new(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .with_context(|| format!("report file must be new: {}", path.display()))?,
+        )
+    } else {
+        Box::new(std::io::stdout())
     };
     if let Some(dir) = &args.dump_dir {
         std::fs::create_dir(dir)
@@ -190,7 +209,7 @@ fn run(args: Args) -> anyhow::Result<()> {
             }
             let report = json!({"event":"frame", "index":index - args.warmup,
                 "source_pts_ns": acquired.pts_ns, "buffer_offset":acquired.sequence, "views":reports});
-            println!("{report}");
+            writeln!(report_output, "{report}")?;
             if index == args.warmup
                 && let Some(dir) = &args.dump_dir
             {
@@ -220,9 +239,10 @@ fn run(args: Args) -> anyhow::Result<()> {
     } else {
         None
     };
-    drop(capture); // Release V4L2 before reporting success.
+    drop(capture); // Release the camera before reporting success.
     drop(engine); // Flush an explicitly requested ORT profile.
-    println!(
+    writeln!(
+        report_output,
         "{}",
         json!({"event":"summary", "camera":camera, "both_eyes":args.both_eyes,
         "physical_rotation":rotation.degrees(),
@@ -231,8 +251,9 @@ fn run(args: Args) -> anyhow::Result<()> {
         "source_pts_span_fps":source_span_fps, "nonincreasing_pts":nonincreasing_pts,
         "inferences":infer_ms.len(), "inference_mean_ms":mean, "inference_p95_ms":p95,
         "total_capture_seconds":started.elapsed().as_secs_f64(),
-        "note":"latest-frame consumption, not a USB transport loss test; SBS is not depth or hardware-sync validation"})
-    );
+        "note":"latest-frame consumption, not a transport loss test; SBS is not depth or hardware-sync validation"})
+    )?;
+    report_output.flush()?;
     Ok(())
 }
 
@@ -254,7 +275,7 @@ fn main() -> ExitCode {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = args;
-        eprintln!("camera-check requires Linux V4L2 and GStreamer");
+        eprintln!("camera-check requires Linux and GStreamer");
         ExitCode::FAILURE
     }
 }

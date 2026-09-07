@@ -166,7 +166,8 @@ K1_PROGRAMS='robotd robotctl updaterd configd btd padd mediad tofd camera-check 
     install -m 755 "$K1_BIN/$name" "$K1_SDK_PREFIX/bin/$name"
   done
   install -m 644 deploy/k1/camera-usb-mono.toml deploy/k1/camera-usb-decxin-sbs.toml \
-    deploy/k1/camera-usb-decxin-mpp.toml deploy/k1/robotd-audio.toml "$K1_SDK_PREFIX/config/"
+    deploy/k1/camera-usb-decxin-mpp.toml deploy/k1/camera-imx219.toml \
+    deploy/k1/imx219-csi3-720p.json deploy/k1/robotd-audio.toml "$K1_SDK_PREFIX/config/"
   git rev-parse HEAD > "$K1_SDK_PREFIX/REVISION"
 )
 printf 'Developer SDK: %s\n' "$K1_SDK_PREFIX"
@@ -254,6 +255,17 @@ For software capture use the reviewed `camera-usb-decxin-sbs.toml` or `camera-us
 instead; the bridge is then not loaded. MPP pixel output is not bit-identical to the software
 decoder/scaler, which is one reason acceleration stays explicit rather than default.
 
+### Optional IMX219 / K1 CSI input
+
+For a MUSE-Pi-Pro with an IMX219 on vendor CSI3 (`sensor_id=2`), the opt-in
+`camera.backend = "spacemit_csi"` uses the installed `spacemitsrc` and a vendor ISP JSON.
+It does not use the USB MPP/OpenCV bridge or Rockchip sensor controls. Before opening the camera,
+review `camera-imx219.toml` and `imx219-csi3-720p.json`; adjust the absolute `camera.isp_config`
+and model paths, especially when using the private installation above.
+The [IMX219 guide](../project/k1-imx219.md) contains the tested board/runtime, bounded capture
+and ORT/EP commands, model requirements and remaining image-quality/streaming limits.
+This is not automatic support for other CSI ports or unverified sensor modules.
+
 ## 7. Optional detector and ES8326
 
 - **Vision:** supply the verified floating-point opset 17 `duck_detect.slim.onnx` and the
@@ -290,6 +302,6 @@ a claim of zero behavioural changes or a completed RK3566 hardware regression.
 
 Native build/tests, policy inference, ES8326 and selected-eye USB/EP checks are recorded in
 [the K1 bring-up report](../project/spacemit-k1.md). Real HAT/UART/servo/IMU feedback,
-IMX219 CSI/ISP, ToF, controller/gamepad bring-up, complete H.264/WebRTC, combined-load and
+IMX219 image-quality/long-run acceptance, ToF, controller/gamepad bring-up, complete H.264/WebRTC, combined-load and
 labelled detection acceptance, and RISC-V provisioning/signed releases/OTA remain separate
 work. Installing these binaries does not make `robotctl health` a hardware acceptance test.

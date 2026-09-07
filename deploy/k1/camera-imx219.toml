@@ -1,0 +1,26 @@
+# MUSE-Pi-Pro, IMX219 on vendor CSI3 (sensor_id=2). Explicit opt-in.
+# Adjust these two absolute paths if your checkout/model directory is elsewhere.
+[camera]
+backend = "spacemit_csi"
+isp_config = "/root/workspace/microduck/deploy/k1/imx219-csi3-720p.json"
+input_format = "nv12"
+width = 1280
+height = 720
+fps = 30
+rotate = 0
+
+[media]
+camera = true
+quality = "720p30"
+
+# Inference stays opt-in: camera-check --detect --model PATH enables it explicitly.
+# For mediad, also set enabled=true after capture/model validation.
+[detect]
+enabled = false
+model = "/root/.local/share/microduck/models/duck_detect.slim.onnx"
+onnx_provider = "spacemit"
+onnx_threads = 3
+spacemit_affinity = "0;1;2"
+spacemit_allow_fp16_epilogue = false
+hz = 2.0
+threshold = 0.35

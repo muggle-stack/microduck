@@ -4,9 +4,31 @@ use anyhow::{Result, ensure};
 use robotd_params::CameraRect;
 
 #[cfg(target_os = "linux")]
+pub mod csi;
+#[cfg(target_os = "linux")]
 mod k1;
 #[cfg(target_os = "linux")]
 pub mod usb;
+
+// Keep the existing usb::Capture API available while both backends share its
+// stride-aware latest-frame sink and teardown, not separate detector pipelines.
+#[cfg(target_os = "linux")]
+pub use usb::Capture;
+
+#[cfg(target_os = "linux")]
+pub fn source_with_rotation(
+    camera: &robotd_params::CameraParams,
+    output: Option<robotd_params::Quality>,
+    rotation: crate::pipeline::Rotation,
+) -> Result<gstreamer::Bin> {
+    match camera.backend {
+        robotd_params::CameraBackend::Usb => usb::source_with_rotation(camera, output, rotation),
+        robotd_params::CameraBackend::SpacemitCsi => csi::source(camera, output, rotation),
+        robotd_params::CameraBackend::Rockchip => {
+            anyhow::bail!("the original Rockchip camera is managed by mediad's RKISP pipeline")
+        }
+    }
+}
 
 /// Copy a UYVY rectangle without resampling or interpreting its colours.
 /// The input stride may include padding; the result is tightly packed. Chroma pairs

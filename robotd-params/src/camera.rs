@@ -8,6 +8,8 @@ pub enum CameraBackend {
     #[default]
     Rockchip,
     Usb,
+    /// K1's installed spacemitsrc plugin and an explicit vendor ISP JSON profile.
+    SpacemitCsi,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +63,8 @@ pub struct CameraParams {
     pub acceleration: CameraAcceleration,
     /// Required for USB. Prefer /dev/v4l/by-id/...-video-index0 over a changing number.
     pub device: String,
+    /// Only for spacemit_csi. Never auto-probe sensors or reuse Rockchip controls.
+    pub isp_config: Option<std::path::PathBuf>,
     pub input_format: CameraFormat,
     pub width: u32,
     pub height: u32,
@@ -74,7 +78,7 @@ pub struct CameraParams {
     pub left_roi: Vec<u32>,
     /// Empty means the right half of a conventional SBS image. Unused in mono mode.
     pub right_roi: Vec<u32>,
-    /// Unset preserves Radxa's 90-degree mount; USB defaults to unrotated.
+    /// Unset preserves Radxa's 90-degree mount; USB and K1 CSI default to unrotated.
     pub rotate: Option<u32>,
 }
 
@@ -84,6 +88,7 @@ impl Default for CameraParams {
             backend: CameraBackend::Rockchip,
             acceleration: CameraAcceleration::Software,
             device: String::new(),
+            isp_config: None,
             input_format: CameraFormat::Mjpeg,
             width: 1280,
             height: 720,
@@ -101,13 +106,47 @@ impl CameraParams {
     pub fn rotation(&self) -> u32 {
         self.rotate.unwrap_or(match self.backend {
             CameraBackend::Rockchip => 90,
-            CameraBackend::Usb => 0,
+            CameraBackend::Usb | CameraBackend::SpacemitCsi => 0,
         })
     }
 
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(self.rotation(), 0 | 90 | 180 | 270) {
             return Err("camera.rotate must be 0, 90, 180 or 270 degrees".into());
+        }
+        if self.backend == CameraBackend::SpacemitCsi {
+            if self.isp_config.as_ref().is_none_or(|p| !p.is_absolute()) {
+                return Err("spacemit_csi requires an absolute camera.isp_config JSON path".into());
+            }
+            if !self.device.is_empty() || self.acceleration != CameraAcceleration::Software {
+                return Err("spacemit_csi uses the ISP profile, not camera.device or the USB acceleration bridge".into());
+            }
+            if self.input_format != CameraFormat::Nv12
+                || self.layout != CameraLayout::Mono
+                || self.view != CameraView::Left
+                || !self.left_roi.is_empty()
+                || !self.right_roi.is_empty()
+            {
+                return Err(
+                    "spacemit_csi currently requires NV12 mono, left view and no ROIs".into(),
+                );
+            }
+            if self.width == 0
+                || self.height == 0
+                || self.width > 4096
+                || self.height > 2160
+                || !self.width.is_multiple_of(2)
+                || !self.height.is_multiple_of(2)
+                || !(1..=120).contains(&self.fps)
+            {
+                return Err(
+                    "spacemit_csi requires even dimensions up to 4096x2160 and 1..120 fps".into(),
+                );
+            }
+            return Ok(());
+        }
+        if self.isp_config.is_some() {
+            return Err("camera.isp_config requires backend = 'spacemit_csi'".into());
         }
         if self.backend != CameraBackend::Usb {
             if self.acceleration != CameraAcceleration::Software {
@@ -230,6 +269,55 @@ impl CameraParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn csi_is_explicit_and_cannot_silently_select_usb_or_a_second_eye() {
+        let valid = CameraParams {
+            backend: CameraBackend::SpacemitCsi,
+            isp_config: Some("/etc/microduck/imx219.json".into()),
+            input_format: CameraFormat::Nv12,
+            ..Default::default()
+        };
+        valid.validate().unwrap();
+        assert_eq!(valid.rotation(), 0);
+        let mut invalid = vec![];
+        let mut p = valid.clone();
+        p.isp_config = None;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.isp_config = Some("relative.json".into());
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.device = "/dev/video0".into();
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.acceleration = CameraAcceleration::Spacemit;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.layout = CameraLayout::StereoSbs;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.view = CameraView::Right;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.left_roi = vec![0, 0, 640, 480];
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.input_format = CameraFormat::Mjpeg;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.height = 721;
+        invalid.push(p);
+        let mut p = valid.clone();
+        p.fps = 0;
+        invalid.push(p);
+        let mut p = valid;
+        p.backend = CameraBackend::Rockchip;
+        invalid.push(p);
+        for p in invalid {
+            assert!(p.validate().is_err(), "{p:?}");
+        }
+    }
 
     fn usb() -> CameraParams {
         CameraParams {

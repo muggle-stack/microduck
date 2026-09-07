@@ -207,6 +207,11 @@ pub enum Source {
         camera: robotd_params::CameraParams,
         quality: robotd_params::Quality,
     },
+    /// K1 CSI/ISP through the installed vendor plugin, never the Rockchip source.
+    SpacemitCsi {
+        camera: robotd_params::CameraParams,
+        quality: robotd_params::Quality,
+    },
 }
 
 /// The head camera, and the two things it will not work without.
@@ -423,12 +428,12 @@ pub fn start(
             src
         }
         Source::Camera(camera) => camera_source(camera, fps)?,
-        Source::Usb { camera, quality } => {
+        Source::Usb { camera, quality } | Source::SpacemitCsi { camera, quality } => {
             anyhow::ensure!(
                 (width, height, fps) == (quality.width(), quality.height(), quality.fps()),
-                "USB output quality differs from pipeline settings"
+                "camera output quality differs from pipeline settings"
             );
-            crate::camera::usb::source_with_rotation(
+            crate::camera::source_with_rotation(
                 camera,
                 Some(*quality),
                 if source_rotates {

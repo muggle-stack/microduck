@@ -91,7 +91,7 @@ pub const REGISTRY: &[Entry] = &[
     // Camera input is independent of the outgoing [media] quality ladder.
     entry(
         "camera.backend",
-        Kind::Choice(&["rockchip", "usb"]),
+        Kind::Choice(&["rockchip", "usb", "spacemit_csi"]),
         "Camera backend; the original Rockchip path remains the default",
     ),
     entry(
@@ -105,20 +105,29 @@ pub const REGISTRY: &[Entry] = &[
         "USB capture device; prefer an explicit /dev/v4l/by-id/...-video-index0 path",
     ),
     entry(
+        "camera.isp_config",
+        Kind::OptionalPath,
+        "Explicit vendor ISP JSON for spacemit_csi; no sensor auto-probing",
+    ),
+    entry(
         "camera.input_format",
         Kind::Choice(&["mjpeg", "yuyv", "uyvy", "nv12"]),
-        "Format advertised by the USB camera, before decoding/conversion",
+        "USB transport or K1 ISP output format, before decoding/conversion",
     ),
     entry(
         "camera.width",
         Kind::Integer,
-        "Native USB capture width, not the outgoing stream width",
+        "USB capture or K1 ISP output width, not the outgoing stream width",
     ),
-    entry("camera.height", Kind::Integer, "Native USB capture height"),
+    entry(
+        "camera.height",
+        Kind::Integer,
+        "USB capture or K1 ISP output height",
+    ),
     entry(
         "camera.fps",
         Kind::Integer,
-        "Native USB capture frame rate; choose an advertised mode",
+        "USB capture or K1 ISP frame rate; must match the source mode",
     ),
     entry(
         "camera.layout",
@@ -143,7 +152,7 @@ pub const REGISTRY: &[Entry] = &[
     entry(
         "camera.rotate",
         Kind::OptionalInteger,
-        "Mount rotation clockwise; unset means Rockchip 90 degrees, USB 0",
+        "Mount rotation clockwise; unset means Rockchip 90 degrees, USB/K1 CSI 0",
     ),
     // ── [bus] ────────────────────────────────────────────────────────────────
     entry("bus.port", Kind::Text, "Dynamixel serial port device"),

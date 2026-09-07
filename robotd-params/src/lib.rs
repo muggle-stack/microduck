@@ -2740,6 +2740,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn csi_profile_round_trips_without_changing_defaults_or_enabling_inference() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write(
+            dir.path(),
+            include_str!("../../deploy/k1/camera-imx219.toml"),
+        );
+        let params = Params::load(&path, true).unwrap();
+        assert_eq!(params.camera.backend, CameraBackend::SpacemitCsi);
+        assert_eq!(params.camera.input_format, CameraFormat::Nv12);
+        assert_eq!(params.camera.rotation(), 0);
+        assert!(!params.detect.enabled);
+        assert_eq!(params.detect.onnx_provider, DetectOnnxProvider::Spacemit);
+        assert_eq!(CameraParams::default().backend, CameraBackend::Rockchip);
+        assert_eq!(
+            DetectParams::default().onnx_provider,
+            DetectOnnxProvider::Cpu
+        );
+    }
+
     /// An unprovisioned board must still come up. A daemon that refuses to start because a
     /// config file is absent is far harder to diagnose on a robot than one running on
     /// documented defaults.
