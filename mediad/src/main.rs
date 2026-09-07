@@ -256,7 +256,7 @@ fn main() -> ExitCode {
         // `get_frame` surface in `architecture.md` §5.3 is what the rest of it is for. The branch
         // runs from the start rather than being added later, because a tee inserted into a live
         // pipeline is a different and much harder problem than a tee that was always there.
-        let (_pipeline, mut channels, frames) =
+        let (pipeline, mut channels, frames) =
             match mediad::pipeline::start(source.clone(), &producer, &settings) {
                 Ok(started) => started,
                 Err(e) => {
@@ -350,7 +350,26 @@ fn main() -> ExitCode {
         // One session per peer, each with its own connections to the services it talks to. Per
         // peer rather than shared, so one peer's minutes-long update cannot silence another's
         // telemetry — which is the same reason a session keeps one connection per lane.
-        while let Some(channel) = channels.recv().await {
+        let stop = shutdown_signal(matches!(source, mediad::pipeline::Source::SpacemitCsi { .. }));
+        tokio::pin!(stop);
+        loop {
+            let channel = tokio::select! {
+                stopped = &mut stop => {
+                    let cleanup = mediad::pipeline::stop_k1(pipeline);
+                    let result = stopped.and(cleanup);
+                    return match result {
+                        Ok(()) => ExitCode::SUCCESS,
+                        Err(error) => {
+                            tracing::error!(error = %format!("{error:#}"), "K1 media shutdown failed");
+                            ExitCode::FAILURE
+                        }
+                    };
+                }
+                channel = channels.recv() => match channel {
+                    Some(channel) => channel,
+                    None => break,
+                }
+            };
             let (replies_tx, mut replies_rx) = tokio::sync::mpsc::channel::<String>(256);
             let pool = mediad::upstream::Pool::new(Default::default(), replies_tx);
 
@@ -410,8 +429,27 @@ fn main() -> ExitCode {
 
         // The pipeline outlived its consumers, which means `webrtcsink` stopped producing them.
         tracing::warn!("no longer accepting peers");
+        if matches!(source, mediad::pipeline::Source::SpacemitCsi { .. }) {
+            if let Err(error) = mediad::pipeline::stop_k1(pipeline) {
+                tracing::error!(error = %format!("{error:#}"), "K1 media shutdown failed");
+            }
+        }
         ExitCode::FAILURE
     })
+}
+
+#[cfg(target_os = "linux")]
+async fn shutdown_signal(k1: bool) -> anyhow::Result<()> {
+    if !k1 {
+        // Keep the existing Radxa process lifecycle unchanged in this adapter.
+        std::future::pending::<()>().await;
+    }
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result?,
+        _ = term.recv() => {},
+    }
+    Ok(())
 }
 
 /// `mediad` is a Linux daemon: it drives GStreamer against a Rockchip VPU and a V4L2 capture path.

@@ -1,0 +1,211 @@
+diff --git a/net/webrtc/src/utils.rs b/net/webrtc/src/utils.rs
+index 58014e6..504bca8 100644
+--- a/net/webrtc/src/utils.rs
++++ b/net/webrtc/src/utils.rs
+@@ -777,14 +777,22 @@ impl Codec {
+         match self.name.as_str() {
+             "H264" => {
+                 if force_profile {
++                    // The tested K1 vendor encoder emits Main and has no profile
++                    // control. Negotiate the real bitstream; do not relabel it
++                    // as constrained-baseline to make discovery appear to pass.
++                    let profile = if self.encoder_name().as_deref() == Some("spacemith264enc") {
++                        "main"
++                    } else {
++                        "constrained-baseline"
++                    };
+                     gst::debug!(
+                         CAT,
+-                        "No H264 profile requested, selecting constrained-baseline"
++                        "No H264 profile requested, selecting {profile}"
+                     );
+ 
+                     gst::Caps::builder(codec_caps_name)
+                         .field("stream-format", "avc")
+-                        .field("profile", "constrained-baseline")
++                        .field("profile", profile)
+                         .build()
+                 } else {
+                     gst::Caps::builder(codec_caps_name)
+diff --git a/net/webrtc/src/webrtcsink/imp.rs b/net/webrtc/src/webrtcsink/imp.rs
+index 1577424..38679ca 100644
+--- a/net/webrtc/src/webrtcsink/imp.rs
++++ b/net/webrtc/src/webrtcsink/imp.rs
+@@ -56,6 +56,7 @@ const GL_MEMORY_FEATURE: &str = "memory:GLMemory";
+ const NVMM_MEMORY_FEATURE: &str = "memory:NVMM";
+ const D3D11_MEMORY_FEATURE: &str = "memory:D3D11Memory";
+ const VA_MEMORY_FEATURE: &str = "memory:VAMemory";
++const DMA_BUF_MEMORY_FEATURE: &str = "memory:DMABuf";
+ 
+ const RTP_TWCC_URI: &str =
+     "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01";
+@@ -685,6 +686,30 @@ fn make_converter_for_video_caps(caps: &gst::Caps, codec: &Codec) -> Result<gst:
+ 
+                 ret.add_many([&vapostproc])?;
+                 (vapostproc.clone(), vapostproc)
++            } else if codec
++                .encoder_factory()
++                .is_some_and(|factory| factory.name() == "mpph264enc")
++            {
++                // Preserve microduck-gst-plugins v3's Rockchip converter bypass.
++                let identity = make_element("identity", None)?;
++                ret.add_many([&identity])?;
++                (identity.clone(), identity)
++            } else if codec
++                .encoder_factory()
++                .is_some_and(|factory| factory.name() == "spacemith264enc")
++            {
++                // K1's ISP buffers must reach the vendor encoder as DMA-BUF.
++                // Software conversion removes that allocation contract and
++                // makes the encoder's USERPTR queue fail. No implicit resizing
++                // or format conversion is supported by this opt-in path.
++                anyhow::ensure!(
++                    feature.contains(DMA_BUF_MEMORY_FEATURE)
++                        && video_info.format() == gst_video::VideoFormat::Nv12,
++                    "spacemith264enc requires NV12 DMA-BUF input"
++                );
++                let identity = make_element("identity", None)?;
++                ret.add_many([&identity])?;
++                (identity.clone(), identity)
+             } else {
+                 let convert = make_element("videoconvert", None)?;
+                 let scale = make_element("videoscale", None)?;
+@@ -1344,6 +1369,7 @@ impl State {
+                 let _ = RUNTIME.block_on(stats_collection_handle);
+             }
+ 
++            drain_spacemit_encoder(&pipeline);
+             let _ = pipeline.set_state(gst::State::Null);
+             drop(pipeline);
+ 
+@@ -1578,6 +1604,77 @@ impl SessionInner {
+     }
+ }
+ 
++// K1's vendor encoder must finish its input queue before NULL. Otherwise it can
++// retain the camera's DMA-BUF pool for tens of seconds during a quick reconnect.
++// This runs on the existing finalizer worker, after all producer links are gone.
++// Do not wait for the pipeline bus: CustomBusStream consumes its messages.
++fn drain_spacemit_encoder(pipeline: &gst::Pipeline) {
++    let encoders: Vec<_> = pipeline
++        .children()
++        .into_iter()
++        .filter(|element| {
++            element
++                .factory()
++                .is_some_and(|f| f.name() == "spacemith264enc")
++        })
++        .collect();
++    if encoders.is_empty() {
++        return;
++    }
++    let (sent, received) = std::sync::mpsc::channel();
++    let mut probes = Vec::new();
++    for encoder in encoders {
++        if let Some(pad) = encoder.static_pad("src") {
++            let sent = sent.clone();
++            if let Some(id) = pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
++                if info
++                    .event()
++                    .is_some_and(|event| matches!(event.view(), gst::EventView::Eos(..)))
++                {
++                    let _ = sent.send(());
++                }
++                gst::PadProbeReturn::Ok
++            }) {
++                probes.push((pad, id));
++            }
++        }
++    }
++    for source in pipeline
++        .children()
++        .into_iter()
++        .filter_map(|e| e.downcast::<gst_app::AppSrc>().ok())
++    {
++        let _ = source.end_of_stream();
++    }
++    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
++    let mut drained = !probes.is_empty();
++    for _ in &probes {
++        if received
++            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
++            .is_err()
++        {
++            drained = false;
++            break;
++        }
++    }
++    for (pad, id) in probes {
++        pad.remove_probe(id);
++    }
++    if drained {
++        gst::info!(
++            CAT,
++            obj = pipeline,
++            "K1 encoder drained before session teardown"
++        );
++    } else {
++        gst::warning!(
++            CAT,
++            obj = pipeline,
++            "K1 encoder EOS timed out; attempting NULL"
++        );
++    }
++}
++
+ impl Drop for PipelineWrapper {
+     fn drop(&mut self) {
+         let _ = self.0.set_state(gst::State::Null);
+@@ -1772,6 +1869,10 @@ impl BaseWebRTCSink {
+ 
+         let settings = self.settings.lock().unwrap();
+ 
++        if settings.cc_info.heuristic == WebRTCSinkCongestionControl::Disabled {
++            return Ok(());
++        }
++
+         if codec.is_video()
+             && let Some(enc_name) = codec.encoder_name().as_deref()
+             && !VideoEncoder::is_bitrate_supported(enc_name)
+@@ -1785,10 +1886,6 @@ impl BaseWebRTCSink {
+             return Ok(());
+         }
+ 
+-        if settings.cc_info.heuristic == WebRTCSinkCongestionControl::Disabled {
+-            return Ok(());
+-        }
+-
+         let Some(twcc_id) = self.pick_twcc_extension_id(payloader, extension_configuration_type)
+         else {
+             return Ok(());
+@@ -3503,6 +3600,17 @@ impl BaseWebRTCSink {
+                             .await;
+                     }
+                     gst::MessageView::Eos(..) => {
++                        // A retired K1 session deliberately drains its encoder.
++                        // Still report EOS on an active session as unexpected.
++                        if !this
++                            .state
++                            .lock()
++                            .unwrap()
++                            .sessions
++                            .contains_key(&session_id_clone)
++                        {
++                            continue;
++                        }
+                         gst::error!(
+                             CAT,
+                             "Unexpected end of stream in session {}",
+@@ -5835,6 +5943,12 @@ impl ElementImpl for BaseWebRTCSink {
+                 .structure_with_features(
+                     gst::Structure::builder("video/x-raw").build(),
+                     gst::CapsFeatures::new([VA_MEMORY_FEATURE]),
++                )
++                .structure_with_features(
++                    gst::Structure::builder("video/x-raw")
++                        .field("format", "NV12")
++                        .build(),
++                    gst::CapsFeatures::new([DMA_BUF_MEMORY_FEATURE]),
+                 );
+ 
+             // Ignore specific raw caps from Codecs: they are covered by video/x-raw & audio/x-raw

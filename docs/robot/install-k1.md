@@ -65,8 +65,8 @@ readlink -f /usr/lib/libspacemit_ep.so
 ```
 
 The `gstreamer-webrtc-1.0` **development library is not the `webrtcsink` runtime plugin**.
-The SDK can compile and `camera-check` can run without that plugin; browser streaming still
-needs separate integration. The Rust SDK uses native `/usr/lib` ORT/EP, not Python's bundled
+The SDK can compile and `camera-check` can run without that plugin; the opt-in
+[K1 WebRTC guide](../project/k1-webrtc.md) builds it in a private directory. The Rust SDK uses native `/usr/lib` ORT/EP, not Python's bundled
 runtime. `python3-spacemit-ort` is optional for Python experiments, not a Rust runtime requirement.
 
 ## 3. Install Rust 1.89 without replacing apt Rust
@@ -283,6 +283,16 @@ cargo k1 --locked --features mediad/rtsp --bin camera-rtsp -j 2
 The ordinary SDK build does not enable this feature or require the native RTSP-server library.
 The private installer does not automatically install/start this tool; use the binary under
 `target/riscv64gc-unknown-linux-gnu/release/` as described in the linked guide.
+
+### Optional IMX219 WebRTC console
+
+The [K1 WebRTC guide](../project/k1-webrtc.md) adds the pinned native `rswebrtc` / `rsrtp`
+plugins, the separate plugin-only Rust 1.92 toolchain, and `gstreamer1.0-nice` after apt review.
+The SDK itself remains on Rust 1.89. Use `deploy/k1/webrtc-imx219.toml` with `mediad` and
+the private `GST_PLUGIN_PATH` / `GST_REGISTRY`; do not replace the vendor libraries or run
+the Radxa setup script. The existing console displays video and receives detector notifications
+over the control DataChannel. Detection is opt-in and still requires the separately supplied model.
+Follow that guide's loopback/SSH instructions and LAN-only security limitations.
 
 ## 7. Optional detector and ES8326
 
