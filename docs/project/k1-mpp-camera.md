@@ -1,4 +1,9 @@
+<a id="k1-mpp--spacemit-opencv-相机后端"></a>
 # K1 MPP + SpaceMIT OpenCV camera backend
+
+[English](k1-mpp-camera.md) · [简体中文](k1-mpp-camera_zh.md)
+
+> Dated test results and known issues are recorded below. See [adaptation status](spacemit-k1-adaptation.md) for current functionality, and the [IMX219](k1-imx219.md) / [WebRTC](k1-webrtc.md) guides for the integrated camera workflows.
 
 This is an **explicit, opt-in USB processing backend** for the existing SDK camera
 and detector consumers. It does not port IMX219/ISP or complete H.264/WebRTC.
@@ -10,6 +15,7 @@ contains two eyes. Dual-eye measurements below are retained as extra diagnostics
 remaining acceptance requirement. For toolchain setup and a relocatable development install,
 start with [the K1 installation guide](../robot/install-k1.md).
 
+<a id="各处理步骤的位置"></a>
 ## What runs where
 
 ```text
@@ -52,6 +58,7 @@ UYVY buffer and SDK frame copy are still CPU-visible copies: **not end-to-end ze
 Here "contiguous" means the two-plane layout within one DMA-BUF, not a claim of
 physically contiguous pages from Linux's `system` DMA heap.
 
+<a id="构建与启用"></a>
 ## Build and select it
 
 Tested on K1/Bianbu 2.1.1 with `opencv-spacemit` **4.14.0-1bb3**, whose libraries
@@ -131,6 +138,7 @@ by V2D after crop/letterbox. `camera-check --flip-in-pipeline` tests that same s
 behavior. 90°/270° swap output dimensions. Native `--both-eyes` extraction cannot
 be combined with this flag; detector rotation must not be applied a second time.
 
+<a id="复现正确性检查"></a>
 ## Reproduce correctness checks
 
 ```sh
@@ -186,6 +194,7 @@ same left ROI, same 1280×720 square-pixel output:
   do **not** prove equivalent labelled detection accuracy. No lower model precision
   or alternate detector preprocessing was enabled. The backend stays **opt-in**.
 
+<a id="实测与限制"></a>
 ## Measurements and limitations
 
 SDK performance was recorded after all board compiler jobs finished (2026-09-06).
@@ -275,8 +284,8 @@ Retained negative results:
   retaining `-Werror`. Neither failing build installed system plugins.
 - Full-workspace host Clippy with `-D warnings` stops at the existing unrelated
   `robotctl/src/monitor.rs:2188` `nonminimal_bool` warning under Rust 1.93. The
-  affected `mediad`/`robotd-params` Clippy check passes; this task does not rewrite
-  the unrelated monitor expression.
+  affected `mediad`/`robotd-params` Clippy check passes. The monitor warning remains
+  outside the camera integration changes.
 
 Do not infer a complete K1 media daemon from these tests. `webrtcsink` is still
 absent on the tested board, encoder selection needs separate integration, IMX219
@@ -288,6 +297,7 @@ Evidence: K1 `target/k1-mpp-camera-20260906.ZGXnqy/`; Mac
 `target/k1-mpp-camera-20260906.WZDoGI/`. Failed probes and build logs are retained;
 generated frames, private dependency builds and model files are not committed.
 
+<a id="文件清单"></a>
 ## File inventory
 
 New:

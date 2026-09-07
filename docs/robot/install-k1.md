@@ -1,4 +1,7 @@
+<a id="spacemit-k1--risc-v原生编译与开发安装"></a>
 # SpaceMIT K1 / RISC-V: build and install for development
+
+[English](install-k1.md) · [简体中文](install-k1_zh.md)
 
 This guide is for **muggle-stack/microduck, branch `main`**, running natively on
 K1/Bianbu. It installs developer binaries into a new private directory, not a complete robot
@@ -15,6 +18,7 @@ Run the following commands **on the K1**, in the same Bash session unless stated
 Root may omit `sudo`. Stop on any failed step. Do not run `provision-board.sh`, `setup-board.sh`,
 `setup-gstreamer.sh`, `install.sh`, release hooks or `dev-push.sh` on the K1.
 
+<a id="1-获取本-fork"></a>
 ## 1. Get this fork
 
 For a new checkout only:
@@ -33,6 +37,7 @@ clone over it or replace local work. This guide assumes a clean, reviewed revisi
 **`riscv64gc-unknown-linux-gnu`**. Running `cargo k1` on a Mac does not provide a Linux
 sysroot, linker or the board's GStreamer libraries.
 
+<a id="2-安装前检查-bianbu-依赖"></a>
 ## 2. Check Bianbu dependencies before installing
 
 Use the board's configured Bianbu apt repositories. First simulate the transaction:
@@ -71,6 +76,7 @@ The SDK can compile and `camera-check` can run without that plugin; the opt-in
 [K1 WebRTC guide](../project/k1-webrtc.md) builds it in a private directory. The Rust SDK uses native `/usr/lib` ORT/EP, not Python's bundled
 runtime. `python3-spacemit-ort` is optional for Python experiments, not a Rust runtime requirement.
 
+<a id="3-独立安装-rust-189保留-apt-rust"></a>
 ## 3. Install Rust 1.89 without replacing apt Rust
 
 If `/opt/microduck-rust-1.89.0/bin/rustc -V` already reports 1.89.0, skip the installation
@@ -114,6 +120,7 @@ cargo -V
 The tested board reports 1.89.0 from the selected compiler and still 1.75.0 from apt's
 `/usr/bin/rustc`. Keeping both is intentional.
 
+<a id="4-构建与软件回归"></a>
 ## 4. Build and run software regression
 
 From the repository root:
@@ -147,6 +154,7 @@ exist before passing that directory to `sh scripts/k1-test.sh ROOT/current 200`.
 [The policy validation record](../project/spacemit-k1.md#validate-real-policy-inference)
 explains the models, network failure cases and what the benchmark does not prove.
 
+<a id="5-安装到新的私有开发目录"></a>
 ## 5. Install developer binaries into a new private prefix
 
 This is a **manual development installation**, not an OTA release. The following creates a
@@ -198,6 +206,7 @@ arguments. Use explicit binary paths for checks; a plain `robotctl` may be an ol
 copy. If desired, `export PATH="$K1_SDK_PREFIX/bin:$PATH"` selects this install in the current
 shell only. That does **not** change the daemons behind existing sockets.
 
+<a id="6-可选-usb-相机与私有-mpp-组件"></a>
 ## 6. Optional USB camera and private MPP bundle
 
 First identify the actual capture device and advertised mode with `v4l2-ctl --list-devices`
@@ -257,6 +266,7 @@ For software capture use the reviewed `camera-usb-decxin-sbs.toml` or `camera-us
 instead; the bridge is then not loaded. MPP pixel output is not bit-identical to the software
 decoder/scaler, which is one reason acceleration stays explicit rather than default.
 
+<a id="可选-imx219--k1-csi-输入"></a>
 ### Optional IMX219 / K1 CSI input
 
 For a MUSE-Pi-Pro with an IMX219 on vendor CSI3 (`sensor_id=2`), the opt-in
@@ -265,11 +275,12 @@ It does not use the USB MPP/OpenCV bridge or Rockchip sensor controls. Before op
 review `camera-imx219.toml` and `imx219-csi3-720p.json`; adjust the absolute `camera.isp_config`
 and model paths, especially when using the private installation above.
 The [IMX219 guide](../project/k1-imx219.md) contains the tested board/runtime, bounded capture
-and ORT/EP commands, model requirements, user image-quality/stability confirmation and
-remaining qualification limits. For browser video with same-source inference, continue with
+and ORT/EP commands, model requirements, measured results and known limitations.
+For browser video with same-source inference, continue with
 the [WebRTC guide](../project/k1-webrtc.md).
 This is not automatic support for other CSI ports or unverified sensor modules.
 
+<a id="可选-k1-csi-rtsp-预览"></a>
 ### Optional K1 CSI RTSP preview
 
 [`camera-rtsp`](../project/k1-rtsp.md) provides video-only IMX219 preview through the native
@@ -288,6 +299,7 @@ The ordinary SDK build does not enable this feature or require the native RTSP-s
 The private installer does not automatically install/start this tool; use the binary under
 `target/riscv64gc-unknown-linux-gnu/release/` as described in the linked guide.
 
+<a id="可选-imx219-webrtc-控制台"></a>
 ### Optional IMX219 WebRTC console
 
 The [K1 WebRTC guide](../project/k1-webrtc.md) adds the pinned native `rswebrtc` / `rsrtp`
@@ -298,6 +310,7 @@ the Radxa setup script. The existing console displays video and receives detecto
 over the control DataChannel. Detection is opt-in and still requires the separately supplied model.
 Follow that guide's loopback/SSH instructions and LAN-only security limitations.
 
+<a id="7-可选检测器与-es8326"></a>
 ## 7. Optional detector and ES8326
 
 - **Vision:** supply the verified floating-point opset 17 `duck_detect.slim.onnx` and the
@@ -321,12 +334,13 @@ Follow that guide's loopback/SSH instructions and LAN-only security limitations.
   change mixer settings or start services. Read [ES8326 setup and duplex validation](../project/spacemit-k1.md#es8326-audio)
   before running the hardware test, which opens the microphone. Install `alsa-utils` if needed.
 
+<a id="8-上游对齐与完成边界"></a>
 ## 8. Upstream alignment and completion boundary
 
-On **2026-09-06**, upstream `pollen-robotics/microduck:main` was still `bc41fb5`, already
-the base of this branch. This guide did not require a rebase. To check later, fetch `upstream`
-and inspect its changes; only rebase a clean worktree, coordinate shared branches before
-rewriting history, and repeat K1 regression afterward. Do not force-push just to align names.
+For upstream versions and supported functionality, see the
+[adaptation status](../project/spacemit-k1-adaptation.md). When maintaining the fork,
+fetch `upstream` and inspect its changes before rebasing. Use a clean worktree,
+coordinate shared-branch history changes and repeat K1 regression after integration.
 
 The port retains the original motion-control core, RKNN implementation and Radxa defaults,
 but also changes shared integration code. In particular, invalid explicit media configuration
@@ -335,9 +349,9 @@ now fails instead of silently selecting Rockchip defaults, including on ARM. See
 a claim of zero behavioural changes or a completed RK3566 hardware regression.
 
 Native build/tests, policy inference, ES8326 and selected-eye USB/EP checks are recorded in
-[the K1 bring-up report](../project/spacemit-k1.md). The tested IMX219 image quality and running
-stability have user confirmation; single-viewer WebRTC video and same-source ORT/EP detection
-are available as described in the [current adaptation status](../project/spacemit-k1-adaptation-zh.md).
+[the K1 bring-up report](../project/spacemit-k1.md). IMX219 capture, single-viewer WebRTC video
+and same-source ORT/EP detection are available; measured results and remaining tests are listed
+in the [current adaptation status](../project/spacemit-k1-adaptation.md).
 Real HAT/UART/servo/IMU feedback, ToF, controller/gamepad bring-up, audio/video integration,
 multi-viewer streaming, quantified long-run/combined-load and labelled detection acceptance,
 and RISC-V provisioning/signed releases/OTA remain separate work. Installing these binaries

@@ -1,4 +1,9 @@
+<a id="k1-usb-相机单目与拼接双目"></a>
 # K1 USB camera: mono and packed stereo
+
+[English](k1-usb-camera.md) · [简体中文](k1-usb-camera_zh.md)
+
+> Dated test results and known issues are recorded below. See [adaptation status](spacemit-k1-adaptation.md) for current functionality, and the [IMX219](k1-imx219.md) / [WebRTC](k1-webrtc.md) guides for the integrated camera workflows.
 
 This is an **opt-in USB backend**, not an IMX219 ISP port and not a WebRTC port.
 The existing Radxa source remains the default (`camera.backend = "rockchip"`, mount 90°).
@@ -9,6 +14,7 @@ MPP codec2/V2D bridge and the installed RVV OpenCV. The software results below r
 historical baselines; see [K1 MPP build, exactness and acceptance](k1-mpp-camera.md).
 Neither the default backend nor detector preprocessing/model precision was changed.
 
+<a id="已实现的配置契约"></a>
 ## Implemented contract
 
 - `mediad` selects `camera.backend = "usb"` from the shared robotd TOML file.
@@ -41,6 +47,7 @@ fail-closed change, including on Radxa; normal valid Radxa configurations are un
 Unknown keys inside the new `[camera]` section are also rejected instead of pruned. Other
 sections retain the existing warn-and-ignore policy for unknown keys.
 
+<a id="配置与无头检查"></a>
 ## Configuration and headless check
 
 Templates (neither is installed automatically):
@@ -124,6 +131,7 @@ No command above starts `robotd`, serial/servos, ToF, audio or a network listene
 K1 `mediad` still needs the separate encoder/WebRTC work (`webrtcsink` is absent on the tested
 board). The headless check validates this source and detector without that dependency.
 
+<a id="硬件证据2026-09-06"></a>
 ## Hardware evidence, 2026-09-06
 
 K1 / Bianbu 2.1.1, `1bcf:2d50` DECXIN Camera, UVC on the USB2 hub:
@@ -153,6 +161,7 @@ Evidence directory on K1: `target/k1-usb-camera-20260906.Lbddrk/`. Mac evidence 
 `target/k1-usb-camera-20260906.F8Gx23/`. The copied native JPEG is byte-identical on both,
 SHA-256 `2a69d3c2bfbe53dede8b2514fa9778f07b7ac91c1ce0e51f7465729ad08df3af`.
 
+<a id="sdk-实时结果"></a>
 ### SDK live results
 
 Native release binaries, Rust 1.89. All compiler processes had exited; the board was at
@@ -219,6 +228,7 @@ FFmpeg verification shell attempt omitted `-nostdin`, consumed part of the SSH s
 and exited 127 before the right-eye check; the corrected `-nostdin` rerun passed both byte
 comparisons. This was a verification-runner error, not an SDK capture failure.
 
+<a id="opencv-rvv-与实时相机资源争用"></a>
 ### OpenCV RVV and live-camera contention
 
 Follow-up measurements on the same K1, 2026-09-06: **253.7 ms is the detector's
@@ -316,6 +326,7 @@ The first standalone Rust link attempt lacked the host proc-macro dependency dir
 and failed with E0463 (`rust-build.log`); adding both target and host dependency search
 paths passed (`rust-build-fixed.log`). That diagnostic build error is retained.
 
+<a id="精确性与验收边界"></a>
 ### Exactness and acceptance boundaries
 
 Software regression on this change:
@@ -345,29 +356,33 @@ as `mono` validates the mono software path, not interoperability with every mono
 camera. IMX219 on K1, real stereo calibration/depth, other UVC models, USB disconnect/reconnect
 recovery, and simultaneous walking/audio/WebRTC load remain separate hardware acceptance work.
 
-## 本轮文件清单
+<a id="本轮文件清单"></a>
+<a id="files-changed-in-this-integration"></a>
+<a id="相关文件"></a>
+## Related files
 
-- 新建：`robotd-params/src/camera.rs`
-- 新建：`mediad/src/camera.rs`
-- 新建：`mediad/src/camera/usb.rs`
-- 新建：`mediad/src/bin/camera-check.rs`
-- 新建：`deploy/k1/camera-usb-mono.toml`
-- 新建：`deploy/k1/camera-usb-decxin-sbs.toml`
-- 新建：`docs/project/k1-usb-camera.md`
-- 修改：`robotd-params/src/lib.rs`
-- 修改：`robotd-params/src/registry.rs`
-- 修改：`robotd-params/src/edit.rs`
-- 修改：`robotctl/src/configure.rs`
-- 修改：`mediad/Cargo.toml`
-- 修改：`mediad/src/lib.rs`
-- 修改：`mediad/src/main.rs`
-- 修改：`mediad/src/pipeline.rs`
-- 修改：`mediad/src/config.rs`
-- 修改：`mediad/src/detect.rs`
-- 修改：`scripts/k1-test.sh`
-- 修改：`.github/workflows/ci.yml`
-- 修改：`docs/project/spacemit-k1.md`
-- 删除：无。
+- New: `robotd-params/src/camera.rs`
+- New: `mediad/src/camera.rs`
+- New: `mediad/src/camera/usb.rs`
+- New: `mediad/src/bin/camera-check.rs`
+- New: `deploy/k1/camera-usb-mono.toml`
+- New: `deploy/k1/camera-usb-decxin-sbs.toml`
+- New: `docs/project/k1-usb-camera.md`
+- Modified: `robotd-params/src/lib.rs`
+- Modified: `robotd-params/src/registry.rs`
+- Modified: `robotd-params/src/edit.rs`
+- Modified: `robotctl/src/configure.rs`
+- Modified: `mediad/Cargo.toml`
+- Modified: `mediad/src/lib.rs`
+- Modified: `mediad/src/main.rs`
+- Modified: `mediad/src/pipeline.rs`
+- Modified: `mediad/src/config.rs`
+- Modified: `mediad/src/detect.rs`
+- Modified: `scripts/k1-test.sh`
+- Modified: `.github/workflows/ci.yml`
+- Modified: `docs/project/spacemit-k1.md`
+- Deleted: none.
 
-生成的日志、测试配置、采样图像和编译产物保留在上述两端 `target/` 证据目录及 Rust
-target 目录中，不加入 Git，不覆盖 `/etc/robot/robotd.toml`。
+Generated logs, test configurations, sampled images and build outputs remain in the evidence
+and Rust `target/` directories above. They are not committed to Git and do not overwrite
+`/etc/robot/robotd.toml`.

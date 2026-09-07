@@ -1,25 +1,31 @@
-# K1 / IMX219：WebRTC 浏览器图传
+<a id="k1--imx219webrtc-浏览器图传"></a>
+# K1 / IMX219: WebRTC browser streaming
 
-这是 `mediad` 的显式 K1 CSI 适配：沿用官方信令、网页控制台和 `control` DataChannel，
-不是另起一套 Python 推流程序。RTSP 工具保持独立，不需同时运行，也不能同时抢占 sensor。
+[English](k1-webrtc.md) · [简体中文](k1-webrtc_zh.md)
+
+This is the explicit K1 CSI path in `mediad`, reusing official signalling, the web console and
+the `control` DataChannel, not a separate Python streaming application.
+RTSP remains an independent tool; do not run it concurrently or compete for the sensor.
 
 ```text
 IMX219 → K1 ISP / CPP → NV12 DMA-BUF → tee
-    ├─ webrtcsink → spacemith264enc → H.264 Main → RTP / WebRTC → 网页视频
-    └─ 按需映射 DMA-BUF → 原生 GstVideoConverter → UYVY BT.601 → Rust ORT / SpaceMIT EP
-                               → media.detections → DataChannel → 网页 SVG 框
+    ├─ webrtcsink → spacemith264enc → H.264 Main → RTP / WebRTC → browser video
+    └─ map on demand DMA-BUF → native GstVideoConverter → UYVY BT.601 → Rust ORT / SpaceMIT EP
+                               → media.detections → DataChannel → browser SVG boxes
 ```
 
-目前限定 MUSE-Pi-Pro、CSI3 IMX219、1280×720、30 fps 配置、可信局域网。
-检测默认关闭；原 Rockchip、USB 采集及 `camera-rtsp` 路径不被替换。
-网页的控制 API 被保留不等于 K1 已完成真实舵机/IMU 闭环。
+Current scope: MUSE-Pi-Pro, CSI3 IMX219, 1280×720, 30 fps configuration and a trusted LAN.
+Detection defaults to off. The Rockchip, USB capture and `camera-rtsp` paths are not replaced.
+Retaining the web control API does not mean the real K1 servo/IMU loop has been validated.
 
-## 1. 系统依赖
+<a id="1-系统依赖"></a>
+## 1. System dependencies
 
-先完成 [SDK 原生构建准备](../robot/install-k1.md) 和 [IMX219 采集验证](k1-imx219.md)。
-不要在 K1 执行 Radxa 的 `setup-gstreamer.sh`，也不要复制 aarch64 插件。
+Complete [native SDK build preparation](../robot/install-k1.md) and [IMX219 capture validation](k1-imx219.md) first.
+Do not run Radxa's `setup-gstreamer.sh` on K1 or copy aarch64 plugins.
 
-WebRTC 还需要 ICE 的 GStreamer 插件。先模拟，确认不升级/移除 vendor 多媒体包后再安装：
+WebRTC also needs the GStreamer ICE plugin. Simulate installation and ensure no vendor multimedia
+packages would be upgraded or removed before proceeding:
 
 ```sh
 sudo apt-get -s install gstreamer1.0-nice
@@ -30,15 +36,17 @@ gst-inspect-1.0 spacemitsrc
 gst-inspect-1.0 spacemith264enc
 ```
 
-本次 MUSE-Pi 使用 GStreamer 1.24.2，只新增 `gstreamer1.0-nice` 0.1.21-2build3，
-没有替换系统 GStreamer、相机驱动、设备树或 MPP。
-`webrtcbin` 存在不代表 `webrtcsink` 已安装，后者单独构建。
+The tested MUSE-Pi uses GStreamer 1.24.2. Only `gstreamer1.0-nice` 0.1.21-2build3 was added;
+system GStreamer, camera drivers, device tree and MPP were not replaced.
+Finding `webrtcbin` does not mean `webrtcsink` is installed; the latter is built separately.
 
-## 2. 给插件准备独立 Rust 1.92
+<a id="2-给插件准备独立-rust-192"></a>
+## 2. A separate Rust 1.92 for the plugins
 
-SDK 本身继续使用 Rust **1.89**；固定的 `gst-plugins-rs 0.15.3` 需要 Rust **1.92+**。
-如果 `/opt/microduck-gst-rust-1.92.0/bin/rustc -V` 已存在且正确，可跳过这一段。
-以下下载官方预编译工具链，不编译 Rust，不替换 apt 或 SDK 的 Rust：
+The SDK remains on Rust **1.89**. Pinned `gst-plugins-rs 0.15.3` requires **1.92+**.
+Skip this section if `/opt/microduck-gst-rust-1.92.0/bin/rustc -V` already exists and reports the expected version.
+This downloads an official prebuilt toolchain, not Rust source for compilation,
+and replaces neither apt Rust nor the SDK toolchain:
 
 ```sh
 (
@@ -60,12 +68,13 @@ SDK 本身继续使用 Rust **1.89**；固定的 `gst-plugins-rs 0.15.3` 需要 
 )
 ```
 
-校验值来源：[官方 Rust 1.92 RISC-V distribution checksum](https://static.rust-lang.org/dist/rust-1.92.0-riscv64gc-unknown-linux-gnu.tar.xz.sha256)。
-这两个独立前缀无需改 shell 启动文件；只在对应构建命令里选择工具链。
+Checksum source: [official Rust 1.92 RISC-V distribution checksum](https://static.rust-lang.org/dist/rust-1.92.0-riscv64gc-unknown-linux-gnu.tar.xz.sha256).
+Neither separate prefix requires shell-startup edits. Select the toolchain only for the relevant build command.
 
-## 3. 编译私有 WebRTC 插件和 SDK
+<a id="3-编译私有-webrtc-插件和-sdk"></a>
+## 3. Build the private WebRTC plugins and SDK
 
-在 K1 的 SDK 仓库中：
+In the SDK checkout on K1:
 
 ```sh
 cd ~/workspace/microduck
@@ -75,17 +84,22 @@ export CARGO_TARGET_DIR="$PWD/target"
 PATH=/opt/microduck-rust-1.89.0/bin:$PATH cargo k1 --locked --bin mediad -j 2
 ```
 
-脚本固定上游 commit 和本仓库补丁，只构建 `rswebrtc` / `rsrtp`，输出到
-`target/k1-webrtc/plugins`，不安装到 `/usr/lib` 或 `/usr/local/lib`。
-它有独立 Cargo 缓存；第一次仍需下载/编译 Rust crate，不是重新构建系统 GStreamer。
-本次在 8 GB 板构建，默认 4 个构建任务。上游 release 启用了 LTO，首次原生构建较慢；
-4 GB 板建议先用 `K1_BUILD_JOBS=1` 限制编译峰值内存，未将 8 GB 的构建结果视为 4 GB 验收。
-源码来源、许可和补丁说明见 [native/k1-webrtc](../../native/k1-webrtc/README.md)。
+The script pins the upstream commit and repository patch, builds only `rswebrtc` / `rsrtp`,
+and writes `target/k1-webrtc/plugins`, not `/usr/lib` or `/usr/local/lib`.
+It has a separate Cargo cache. The first run still downloads/builds Rust crates;
+it is not rebuilding system GStreamer.
 
-## 4. 启动并在电脑浏览器查看
+The measured build used an 8 GB board and the default four build jobs.
+Upstream release builds enable LTO, making the first native build slow.
+For a 4 GB board, start with `K1_BUILD_JOBS=1` to limit peak memory.
+The 8 GB result is not a 4 GB acceptance result.
+Source, license and patch details: [native/k1-webrtc](../../native/k1-webrtc/README.md).
 
-检查 [webrtc-imx219.toml](../../deploy/k1/webrtc-imx219.toml) 中的 `camera.isp_config` 绝对路径。
-退出所有其他相机程序，在 K1 运行：
+<a id="4-启动并在电脑浏览器查看"></a>
+## 4. Start and view from a desktop browser
+
+Check the absolute `camera.isp_config` in [webrtc-imx219.toml](../../deploy/k1/webrtc-imx219.toml).
+Exit other camera applications, then on K1:
 
 ```sh
 cd ~/workspace/microduck
@@ -96,117 +110,135 @@ target/riscv64gc-unknown-linux-gnu/release/mediad \
   --config deploy/k1/webrtc-imx219.toml --host 127.0.0.1
 ```
 
-电脑另一个终端：
+In another terminal on the computer:
 
 ```sh
 ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 \
   -L 127.0.0.1:8443:127.0.0.1:8443 musepi
 ```
 
-浏览器打开 **http://127.0.0.1:8080/**，点击 **connect**。
-网页和信令经过 SSH；**视频的 ICE/UDP 直连仍要求电脑能访问板卡的局域网地址**，
-仅能 SSH 到跳板机并不足够。当前没有配置公网 STUN / TURN。
+Open **http://127.0.0.1:8080/** and click **connect**.
+The webpage and signalling use SSH; **video ICE/UDP still requires direct access to the board's LAN address**.
+SSH access through a jump host alone is insufficient. Public STUN / TURN is not configured.
 
-要从同一可信局域网的手机查看，可将 K1 的 `--host` 改为板卡 LAN IP，
-打开 `http://板卡IP:8080/`；无需 SSH 隧道。
-**官方控制台没有用户鉴权，能连接者可调用控制 API**。不要监听公网、转发路由器端口，
-也不要在未知网络运行。当前网页/信令是 HTTP/WS，不以 WebRTC 媒体加密代替访问控制。
+For a phone on the same trusted LAN, set K1 `--host` to its LAN IP and open
+`http://BOARD_IP:8080/`; no SSH tunnel is needed.
+**The official console has no user authentication; a connected peer can call control APIs.**
+Do not listen on the public Internet, forward router ports or run on an unknown network.
+The page/signalling use HTTP/WS; WebRTC media encryption is not access control.
 
-关闭网页连接不会关闭整个 `mediad`；相机仍可供检测支路使用。
-在 K1 按 Ctrl-C 结束服务，再关闭 SSH 隧道。程序尝试 EOS 排空后释放相机；
-清理超时会报错并失败退出，不伪装成正常关闭。
+Disconnecting the page does not stop `mediad`; capture can continue for the detector.
+Press Ctrl-C on K1 to stop the service, then close the SSH tunnel.
+The program attempts EOS draining before releasing the camera.
+A cleanup timeout reports an error and fails rather than pretending shutdown succeeded.
 
-## 5. 开启检测和框
+<a id="5-开启检测和框"></a>
+## 5. Enable detection and boxes
 
-先确认预览正常，再将示例的 `[detect] enabled` 改为 `true`，重启 `mediad`。
-从 [models-duck-detect-v1 模型 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
-下载 `duck_detect.slim.onnx`，按 [IMX219 指南的 SHA256](k1-imx219.md#模型和精度边界) 校验，
-并调整配置中的模型绝对路径。普通 git clone 不下载 Release 资产，SDK 也不会自动获取它。
-这是带独立模型许可声明的 FP32 模型预发布，不是 SDK 固件或 INT8 实验模型。
+First verify preview, then set the example `[detect] enabled` to `true` and restart `mediad`.
+Download `duck_detect.slim.onnx` from the
+[models-duck-detect-v1 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1),
+verify the [SHA256 in the IMX219 guide](k1-imx219.md#模型和精度边界), and adjust the absolute model path.
+Ordinary git clone does not fetch Release assets; the SDK does not download them automatically.
+This is a FP32 model prerelease with a separate model license, not SDK firmware or experimental INT8.
 
-推理复用原 Rust ORT＋EP 和前后处理，结果以 `media.detections` 从同一 DataChannel 发往网页。
-框由官方网页 SVG 绘制，不烧进 H.264：下载原始视频不会自动带框。
-只有模型检出目标才有框；没有框不直接等于图传或推理停止，先看检测计数和服务日志。
-检测模型识别 Microduck 机器人，不是任意鸭子图片或通用 COCO 检测器。
+Inference reuses Rust ORT + EP and existing pre/postprocessing.
+`media.detections` travels over the same DataChannel to the webpage.
+The official SVG draws boxes; they are not burned into H.264, so a downloaded raw video does not automatically include them.
+Boxes appear only when a target is detected. Missing boxes alone do not prove streaming or inference stopped;
+check the detection count and service log.
+This model detects the Microduck robot, not arbitrary duck photographs or generic COCO objects.
 
-## 6. 当前边界
+<a id="6-当前边界"></a>
+## 6. Current boundaries
 
-- 原始 DMA-BUF 交给 `webrtcsink` 内部硬编码，不回退软件 H.264，不隐式旋转/缩放。
-  `media.quality` 必须匹配相机尺寸和帧率；显示方向可用浏览器旋转。
-- 板上编码器实际输出 **H.264 Main**，补丁按真实 profile 协商；不伪装 Baseline。
-  仅支持 Baseline 的客户端不在本次范围内。
-- 该版本 vendor 编码器未暴露码率、GOP、profile 调节属性。
-  必须配置 `congestion_control="disabled"`；`media.bitrate` 不控制它的实际输出。
-  不宣称已完成自适应码率、丢包快速恢复或端到端延迟验收。
-- 仅验证视频和 DataChannel；没有启动麦克风、扬声器、运动服务或舵机。
-  网页中的 `robot.*` / `system.*` 可能因相应守护进程未运行而报错，需与图传故障区分。
-- `webrtcsink` 按观众建立编码会话，不等同于 RTSP 工具的共享编码器。
-  本阶段先验收单观众及重连，多观众资源上限和整机并发另测。
-  网页的 RTT 是网络往返时间，不是 sensor 到屏幕的端到端视频时延。
-- 用户已确认当前 IMX219 图传质量和运行稳定性可接受。早期天花板场景的偏色/高光过曝记录保留，
-  不同光照下的 PQ 和曝光仍需专项回归，SDK 不加滤镜掩盖。
-  H.264 有损编码、YUV 转换和不同 EP 输出不宣称逐字节一致；本次不改模型精度。
+- Original DMA-BUF feeds hardware encoding inside `webrtcsink`, without software H.264 fallback
+  or implicit rotation/scaling. `media.quality` must match camera dimensions/rate.
+  Browser rotation can change display orientation.
+- The board encoder actually outputs **H.264 Main**. The patch negotiates its real profile,
+  not a disguised Baseline stream. Baseline-only clients are outside this validation.
+- This vendor encoder version exposes no bitrate, GOP or profile controls.
+  Configure `congestion_control="disabled"`; `media.bitrate` does not control its actual output.
+  Adaptive bitrate, fast packet-loss recovery and end-to-end latency are not accepted here.
+- Only video and DataChannel were tested; microphone, speaker, motion services and servos were not started.
+  `robot.*` / `system.*` errors from absent daemons must be distinguished from video failures.
+- `webrtcsink` creates encoding sessions per viewer, unlike the RTSP tool's shared encoder.
+  This phase tests one viewer and reconnects; multi-viewer resource limits and whole-robot concurrency need separate tests.
+  The webpage RTT is network round-trip time, not sensor-to-screen video latency.
+- Single-viewer IMX219 video with same-source detection has been verified.
+  Early ceiling-scene tint/highlight-overexposure evidence is retained; PQ/exposure under other lighting still needs regression.
+  The tests used no additional filter.
+  Lossy H.264, YUV conversion and differing EP outputs are not claimed byte-identical; model precision was not changed.
 
-## 7. 2026-09-07 开发过程记录
+<a id="7-2026-09-07-开发过程记录"></a>
+## 7. Development record: 2026-09-07
 
-- 固定 0.15.3 的私有插件使用 Rust 1.92 原生构建成功，首次构建约 44 分钟；
-  `gst-inspect-1.0` 确认从私有路径加载，运行时仍是 vendor GStreamer 1.24.2。
-  SDK 仍由 Rust 1.89 编译。Mac 相关 130 项测试、K1 library 726 项测试通过，
-  K1 的 2 项实物测试默认忽略；这些软件测试不替代 WebRTC 相机实测。
-- 保留首轮失败：`videoconvert` 无法协商 DMA-BUF NV12 到普通 UYVY，
-  SDK 在启动 sensor 前以 `Noformat` 拒绝。改成 appsink 接收真实 DMA-BUF，
-  只映射被请求的帧，通过原生 `GstVideoConverter` 生成普通 BT.601 UYVY；
-  没有使用改 caps 标签的方式伪装内存，没有额外打开一个 sensor。
-- 首轮浏览器出帧和 DataChannel 请求成功，`media.video` 返回 1280×720、rotate 0。
-  ICE 实际选择板卡的 LAN host / UDP candidate；网页和信令通过本地 SSH 隧道。
-  offer 的 H.264 `profile-level-id=4d401f`，Chromium answer 为 `4d001f`，都为 Main。
-  8 秒采样新增解码 237 帧；当时有测试构建并发，仅作为功能证据。
-- 同一采集源开启 ORT / EP 后，15 秒内浏览器新增解码 447 帧、收到 30 条检测通知。
-  场景为天花板，通知中的 `boxes=[]`；不将空场景当作目标检出或精度验收。
-  同时有插件构建，未将这轮结果与独立 `camera-check` 的耗时进行性能比较。
-- 保留重连失败：快速重连前两轮分别新增解码 149 / 152 帧，第三轮只有首帧，
-  接下来 5 秒新增帧数为 0，DataChannel 却仍正常；板端采集随后恢复。
-  另一次带检测运行退出触发 5 秒清理期限、exit 1，即使日志含 sensor power off，
-  也不计为正常释放。针对退出的修复是在 K1 消费会话 NULL 前排空编码器，
-  保留 EOS 失败日志与 SDK 的总退出期限。
+- Private plugins pinned to 0.15.3 built natively with Rust 1.92; the first build took about 44 minutes.
+  `gst-inspect-1.0` confirmed loading from the private path while runtime GStreamer remained vendor 1.24.2.
+  SDK compilation stayed on Rust 1.89. Mac related tests passed 130; K1 library tests passed 726,
+  with two hardware tests ignored by default. These software results do not replace camera/WebRTC tests.
+- Retained first failure: `videoconvert` could not negotiate DMA-BUF NV12 to ordinary UYVY;
+  the SDK rejected `Noformat` before sensor startup.
+  The fix accepts real DMA-BUF at appsink and maps only requested frames, using native `GstVideoConverter`
+  to produce ordinary BT.601 UYVY. No caps-label trick or second sensor opening is used.
+- Initial browser frames and DataChannel requests succeeded; `media.video` returned 1280×720, rotate 0.
+  ICE selected the board's LAN host / UDP candidate; webpage/signalling used local SSH forwarding.
+  H.264 offer `profile-level-id=4d401f` and Chromium answer `4d001f` both indicated Main.
+  Eight seconds added 237 decoded frames; compilation overlapped, so this is functional evidence only.
+- With ORT / EP on the same source, 15 seconds added 447 decoded frames and 30 detection notifications.
+  The ceiling scene produced `boxes=[]`; it is not target-detection or accuracy acceptance.
+  Plugin compilation overlapped, so these timings are not compared with independent `camera-check` latency.
+- Retained reconnect failure: the first two rapid reconnects added 149 / 152 frames, but the third had only its first frame,
+  then zero new frames over five seconds while DataChannel stayed functional. Board capture later recovered.
+  Another detector-enabled shutdown hit the five-second cleanup deadline and exit 1.
+  A sensor-power-off log alone did not qualify as clean release.
+  The fix drains the K1 encoder before setting retired consumer sessions to NULL,
+  retaining EOS failure logs and the SDK's overall shutdown deadline.
 
-原始日志在板端 `target/k1-webrtc/`，浏览器记录在开发机 `target/webrtc-*.log`。
+Original board logs are under `target/k1-webrtc/`; browser logs under host `target/webrtc-*.log`.
 
-### 修复后的验收
+<a id="修复后的验收"></a>
+### Acceptance after the fixes
 
-- 无编译或其他 SDK 业务并发，硬 cgroup `AllowedCPUs=0-2,4`，采样的全部用户线程均在
-  这四个 CPU 内；EP 三个 worker 使用 `0;1;2`，模型及精度设置不变。
-- 开启检测，连续 8 轮“播放 3 秒 → 断开 → 立即重连”，每轮新增解码
-  **89 / 89 / 89 / 90 / 89 / 89 / 91 / 89 帧**，每轮收到 **6 条**检测通知；
-  8 次日志均确认编码器已排空，未出现 EOS 排空超时。
-- 同一进程再通过实际可见的 Chromium 控制台采样 20 秒，新增解码 **597 帧**，
-  按浏览器统计时间差约 **29.85 fps**；收到 **40 条**检测通知，该窗口统计丢包增量为 0。
-  这是静态天花板场景、单观众、模型已热身的短测，不代表复杂画面码率或长稳保证。
-- 保持浏览器连接并运行检测时向 SDK 发送 SIGINT：浏览器观察到控制通道关闭，
-  SDK **exit 0**，日志包含 `K1 media stopped`、sensor stream off / power off。
-- 随后重新打开 sensor，关闭检测，连续 6 轮立即重连，每轮新增解码
-  **90 / 90 / 89 / 89 / 90 / 91 帧**；以 SIGTERM 停止空闲服务，SDK **exit 0**，相机释放。
-  这轮与最初失败的“关闭检测”配置对应，不能只用开着检测的新配置代替回归。
-- 上述轮次 boot ID 始终为 `385fa665-52e8-423f-96b4-7cfd0af98659`，未依赖重启恢复。
-  部分客户端断开时仍有底层 SCTP association error 日志，后续视频与控制续连均通过；
-  不宣称无告警日志或网络异常恢复已经全部完成。
+- No compilation or other SDK business workload ran concurrently.
+  Hard cgroup `AllowedCPUs=0-2,4` constrained every sampled userspace thread;
+  three EP workers used `0;1;2`, with model and precision unchanged.
+- Detection enabled: eight consecutive “play three seconds → disconnect → immediately reconnect” cycles added
+  **89 / 89 / 89 / 90 / 89 / 89 / 91 / 89 frames**, each with **six detection notifications**.
+  All eight logs confirmed encoder drain without EOS timeout.
+- A subsequent 20-second sample in the visible Chromium console added **597 decoded frames**,
+  about **29.85 fps** by browser timestamps, with **40 notifications** and zero incremental packet loss in that window.
+  This was a static ceiling scene, one viewer and a warmed model, not a complex-scene bitrate or endurance guarantee.
+- Sending SIGINT while the browser and detector remained active closed the control channel;
+  SDK **exit 0**, with `K1 media stopped`, sensor stream-off and power-off logs.
+- Reopening with detection off passed six immediate reconnects:
+  **90 / 90 / 89 / 89 / 90 / 91 frames**. SIGTERM to the idle service yielded **exit 0** and camera release.
+  This repeats the original failing detector-off configuration; detector-on tests alone are insufficient.
+- Boot ID throughout these runs was `385fa665-52e8-423f-96b4-7cfd0af98659`;
+  recovery did not depend on rebooting.
+  Some disconnects still logged a lower-level SCTP association error, but subsequent video/control reconnects passed.
+  This is not a no-warning or complete abnormal-network-recovery claim.
 
-最终日志为板端 `run-d.log` / `run-e.log`、`library-tests-final.log`，
-开发机 `webrtc-final-reconnect.log` / `webrtc-final-combined.log` /
-`webrtc-active-stop.log` / `webrtc-final-video-only.log`。本轮测试服务、浏览器和 SSH 隧道均已停止。
+Final board logs: `run-d.log` / `run-e.log` and `library-tests-final.log`.
+Host logs: `webrtc-final-reconnect.log` / `webrtc-final-combined.log` /
+`webrtc-active-stop.log` / `webrtc-final-video-only.log`.
+The services, browser and SSH tunnel used for this development test were stopped.
 
-本次插件构建产物校验值（重新构建不保证字节可复现）：
+Plugin artifact checksums from this build (rebuilding is not guaranteed byte-reproducible):
 
 ```text
 555c37dc09a370210c27f905e3fc915bd4779b90f93a6083d39cc36858042d6c  libgstrswebrtc.so
 59eb4c1c09dd016b8beb525584cec06c0a38e64780c07b09a9f59ba263b9178f  libgstrsrtp.so
 ```
 
-### 后续用户实测确认（2026-09-07）
+<a id="后续用户实测确认2026-09-07"></a>
+<a id="subsequent-user-acceptance-2026-09-07"></a>
+<a id="浏览器图传与检测2026-09-07"></a>
+### Browser video and detection: 2026-09-07
 
-用户在 Mac 浏览器自行启动并使用后确认图传可用、推理正常，随后确认
-**IMX219 稳定性和图传质量可接受**。当前单观众 IMX219 视频与同源检测可供开发使用，
-无需继续把用户可见图像质量列为未验收的阻塞项。
+A Mac browser can receive single-viewer IMX219 video and same-source ORT / EP detection notifications.
+The tests above record decoded frame counts, detection notification counts, reconnection and shutdown results.
 
-此项是用户实际使用反馈，未附时长、帧统计或标注集，不追加新的帧率、延迟、精度或长稳数字；
-上面的 4 核开发短测仍保留其原始条件。音视频、多观众、网络/相机异常恢复与整机并发仍待专项验收。
+Those measurements retain their original four-CPU short-test conditions.
+End-to-end latency, labelled detection accuracy and quantified endurance have not been measured.
+Audio/video, multiple viewers, network/camera abnormal recovery and whole-robot concurrency require dedicated tests.

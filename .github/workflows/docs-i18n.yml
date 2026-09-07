@@ -1,0 +1,29 @@
+name: docs-i18n
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'docs/i18n.json'
+      - 'scripts/check-docs-i18n.py'
+      - 'scripts/tests/test_docs_i18n.py'
+      - '.github/workflows/docs-i18n.yml'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'docs/i18n.json'
+      - 'scripts/check-docs-i18n.py'
+      - 'scripts/tests/test_docs_i18n.py'
+      - '.github/workflows/docs-i18n.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  language-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -B -m unittest discover -s scripts/tests -p test_docs_i18n.py
+      - run: python3 scripts/check-docs-i18n.py

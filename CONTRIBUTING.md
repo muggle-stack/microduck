@@ -1,8 +1,12 @@
+<a id="参与开发"></a>
 # Contributing
+
+[English](CONTRIBUTING.md) · [简体中文](CONTRIBUTING_zh.md)
 
 For working on the daemons themselves. To use a robot rather than change it, see the
 [README](README.md).
 
+<a id="构建与测试"></a>
 ## Building and testing
 
 Needs Rust **1.89+** (stable). The upstream robot is aarch64 Linux; this fork also supports
@@ -77,6 +81,7 @@ default, or with `--docker` builds inside the board's userland instead, which ne
 set up at all. Setup, the flags and the failure modes:
 [`docs/robot/dev-push.md`](docs/robot/dev-push.md).
 
+<a id="仓库布局"></a>
 ## The layout
 
 ```
@@ -126,6 +131,7 @@ never inherit the update engine's http/tar/crypto tree.
 [`docs/design/architecture.md`](docs/design/architecture.md) §1 has what each service is and why it is its own
 process. [`docs/project/roadmap.md`](docs/project/roadmap.md) has what actually works today.
 
+<a id="开发约定"></a>
 ## Conventions
 
 - **Comments say why, not what.** The reason a thing is the way it is outlives the code.
@@ -135,7 +141,16 @@ process. [`docs/project/roadmap.md`](docs/project/roadmap.md) has what actually 
 - **Reach for an existing crate** before writing it yourself. Dependency count is not the thing
   being optimised; maintenance is.
 - Commit trailers use `Assisted-by:`, not `Co-Authored-By:`, for AI assistance.
+- K1 bilingual document pairs are registered in `docs/i18n.json`. Keep body links in the
+  current language, except explicit language switches. Label untranslated upstream references
+  as English in Chinese pages.
+- Update both versions together, preserving commands, configuration, checksums and measurements.
+  Run `python3 scripts/check-docs-i18n.py` before submitting documentation changes.
+- Write documentation for readers without access to development conversations. Describe supported
+  behavior, reproducible steps and dated test results; omit chat quotations, unnamed-user approval
+  and editing-task commentary. Keep measurement limits and unresolved failures explicit.
 
+<a id="readme-中的媒体"></a>
 ## Media in the README
 
 The videos and the hero image are **GitHub attachments, not files in this repo**: drop a clip into
@@ -162,6 +177,7 @@ ffmpeg -i clip.mp4 -vf "fps=15,scale=560:-1:flags=lanczos" -loop 0 -q:v 55 walk.
 
 Two or three seconds, treated as a moving thumbnail. Use a video where sound or length matters.
 
+<a id="发布"></a>
 ## Releasing
 
 Releases are signed **in CI**, never locally. The entry point is the GitHub releases page, and the

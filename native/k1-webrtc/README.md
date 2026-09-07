@@ -1,4 +1,7 @@
+<a id="k1-私有-webrtc-插件"></a>
 # Private K1 WebRTC plugins
+
+[English](README.md) · [简体中文](README_zh.md)
 
 `rswebrtc-k1.patch` applies to GStreamer's `gst-plugins-rs` **0.15.3**, commit
 `6302bea23b53e6461c104f9543df887a63b2d6ec`:

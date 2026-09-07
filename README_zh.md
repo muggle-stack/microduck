@@ -15,9 +15,9 @@
 <p align="center">
   <a href="https://pollen-robotics.com/microduck">官方项目</a> ·
   <a href="docs/project/spacemit-k1-adaptation-zh.md">功能适配进度</a> ·
-  <a href="docs/robot/install-k1.md">K1 编译安装</a> ·
+  <a href="docs/robot/install-k1_zh.md">K1 编译安装</a> ·
   <a href="https://github.com/pollen-robotics/microduck_rl">策略训练</a> ·
-  <a href="CONTRIBUTING.md">参与开发</a>
+  <a href="CONTRIBUTING_zh.md">参与开发</a>
 </p>
 
 ---
@@ -33,8 +33,8 @@ Radxa Zero 3W / Rockchip RK3566，通过 50 Hz 控制循环和神经网络策略
 
 ## SpaceMIT K1 适配
 
-**支持的平台、已验证功能和接下来的工作，请统一查看 [中文适配进度文档](docs/project/spacemit-k1-adaptation-zh.md)。**
-进度文档区分源码接入、K1 板级验证和真实机器人验收，功能数量和剩余工作以该文档为准。
+编译和安装请从 [K1 开发安装指南](docs/robot/install-k1_zh.md)开始。
+支持平台、功能状态、测试结果和后续计划见 [中文适配进度文档](docs/project/spacemit-k1-adaptation-zh.md)。
 
 当前已提供原生 Rust 构建与开发安装、策略推理验证、Rust ORT / SpaceMIT EP 视觉后端、
 USB 单眼采集及可选 MPP / V2D / OpenCV 加速、指定 MUSE-Pi-Pro / CSI3 IMX219 采集、
@@ -43,13 +43,12 @@ RTSP 预览、WebRTC 图传与同源检测，以及 ES8326 音频支持。
 EP 兼容模型已在独立的 [模型 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
 提供下载与校验材料，普通 git clone 不会自动下载模型。
 
-**当前是开发适配版本，不是已完成整机验收的 K1 镜像。** IMX219 当前画质和稳定性已获用户确认；
-真实运动硬件、音视频与多观众图传、ToF、蓝牙/手柄及产品化部署仍需继续推进。
-原项目的演示和功能介绍不代表这些能力已经在 K1 实物上通过验收。
+K1 使用独立的原生构建与开发安装流程；Radxa 专用的镜像配置、aarch64 发布包和 OTA
+安装步骤不能直接用于 K1。
 
 ## 原项目演示
 
-以下视频来自官方项目，用于展示 Microduck 的原有能力，不作为 K1 适配验收证据。
+以下视频来自官方 Microduck 项目，展示其机器人功能。
 
 <table>
 <tr>
@@ -83,19 +82,19 @@ EP 兼容模型已在独立的 [模型 Release](https://github.com/muggle-stack/
 | 文档 | 内容 |
 | --- | --- |
 | [中文适配进度](docs/project/spacemit-k1-adaptation-zh.md) | 当前平台、功能状态、后续计划和验收边界。 |
-| [K1 编译与开发安装](docs/robot/install-k1.md) | 独立 Rust 1.89、Bianbu 依赖、原生编译、隔离安装及外设入口；详细步骤为英文。 |
-| [K1 板级适配记录](docs/project/spacemit-k1.md) | 策略、控制软件、ES8326、视觉和安装的实测记录。 |
-| [Rust ORT / SpaceMIT EP](docs/project/k1-duck-ort-ep.md) | 检测模型要求、配置、CPU 预算和性能验证。 |
-| [USB 相机](docs/project/k1-usb-camera.md) / [MPP 加速](docs/project/k1-mpp-camera.md) | 原生模式、选眼配置、硬件处理和输出差异。 |
-| [IMX219 采集与检测](docs/project/k1-imx219.md) | 指定 MUSE-Pi-Pro / CSI3 的 ISP 输入、模型下载和 ORT / EP 检测。 |
-| [WebRTC 图传与检测](docs/project/k1-webrtc.md) / [RTSP 预览](docs/project/k1-rtsp.md) | 电脑浏览器同源图传/检测、私有插件构建与独立播放器预览。 |
-| [机器人命令速查](docs/robot/cheatsheet.md) | 官方 SDK 的控制、配置、音频、网络、更新和日志命令；K1 可用范围见适配进度。 |
-| [系统架构](docs/design/architecture.md) | 服务职责、总线、IPC 和更新流程。 |
-| [开发说明](CONTRIBUTING.md) / [文档索引](docs/README.md) | 构建测试约定与全部文档入口。 |
+| [K1 编译与开发安装](docs/robot/install-k1_zh.md) | 独立 Rust 1.89、Bianbu 依赖、原生编译、隔离安装及外设入口。 |
+| [K1 板级适配记录](docs/project/spacemit-k1_zh.md) | 策略、控制软件、ES8326、视觉和安装的实测记录。 |
+| [Rust ORT / SpaceMIT EP](docs/project/k1-duck-ort-ep_zh.md) | 检测模型要求、配置、CPU 预算和性能验证。 |
+| [USB 相机](docs/project/k1-usb-camera_zh.md) / [MPP 加速](docs/project/k1-mpp-camera_zh.md) | 原生模式、选眼配置、硬件处理和输出差异。 |
+| [IMX219 采集与检测](docs/project/k1-imx219_zh.md) | 指定 MUSE-Pi-Pro / CSI3 的 ISP 输入、模型下载和 ORT / EP 检测。 |
+| [WebRTC 图传与检测](docs/project/k1-webrtc_zh.md) / [RTSP 预览](docs/project/k1-rtsp_zh.md) | 电脑浏览器同源图传/检测、私有插件构建与独立播放器预览。 |
+| [机器人命令速查（官方英文）](docs/robot/cheatsheet.md) | 官方 SDK 的控制、配置、音频、网络、更新和日志命令；K1 可用范围见适配进度。 |
+| [系统架构（官方英文）](docs/design/architecture.md) | 服务职责、总线、IPC 和更新流程。 |
+| [开发说明](CONTRIBUTING_zh.md) / [文档索引](docs/README_zh.md) | 构建测试约定与全部文档入口。 |
 
 ### 在 K1 上编译
 
-先按 [安装指南](docs/robot/install-k1.md) 准备好工具链和匹配的 Bianbu 开发依赖，
+先按 [安装指南](docs/robot/install-k1_zh.md) 准备好工具链和匹配的 Bianbu 开发依赖，
 再在 **K1 的仓库根目录**执行：
 
 ```sh
@@ -132,6 +131,6 @@ SDK 使用一个 Rust workspace，核心由多个独立进程组成：
 进程通过 Unix socket 上的 JSON-RPC 协作，客户端共享 `duck-ipc-proto` 协议。
 以上是 SDK 的职责划分，不是所有服务都已在 K1 完成硬件验收。
 
-设计说明放在 [`docs/design/`](docs/design/)，适配和实测记录放在
-[`docs/project/`](docs/project/)。贡献代码请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，
+设计与适配资料从[中文文档索引](docs/README_zh.md)进入；未翻译的官方资料会标明英文。
+贡献代码请阅读 [中文开发指南](CONTRIBUTING_zh.md)，
 并保留官方后端、明确新路径的启用条件，以可复现的测试结果更新适配进度。

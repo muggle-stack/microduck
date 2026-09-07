@@ -1,6 +1,11 @@
+<a id="spacemit-k1原生-sdk-回归记录"></a>
 # SpaceMIT K1: native SDK regression
 
-Development branch: [muggle-stack/microduck:spacemit-k1](https://github.com/muggle-stack/microduck/tree/spacemit-k1).
+[English](spacemit-k1.md) · [简体中文](spacemit-k1_zh.md)
+
+> Dated test results and known issues are recorded below. See [adaptation status](spacemit-k1-adaptation.md) for current functionality, and the [IMX219](k1-imx219.md) / [WebRTC](k1-webrtc.md) guides for the integrated camera workflows.
+
+Historical development branch: [muggle-stack/microduck:spacemit-k1](https://github.com/muggle-stack/microduck/tree/spacemit-k1).
 Based on upstream `bc41fb5` (2026-09-05 checkout). This is a native-build and software-regression
 path, not a claim that the Radxa HAT, camera, radio, or installation image is interchangeable.
 
@@ -9,6 +14,7 @@ That page owns the install procedure; this page keeps the dated measurements and
 Upstream `main` was checked again on 2026-09-06 and remained `bc41fb5`; no additional rebase
 was needed for the installation guide.
 
+<a id="在-k1-构建"></a>
 ## Build on the K1
 
 The Rust target is **`riscv64gc-unknown-linux-gnu`**. Bianbu reports `riscv64` from `uname -m`;
@@ -52,6 +58,7 @@ in the official Bianbu archive's `pool/universe/g/gst-plugins-bad1.0/`, even tho
 index only advertises the newer `bb18` vendor revision. Installing the matching dependencies
 added 17 packages, upgraded none, and removed none.
 
+<a id="开发安装指南复验2026-09-06"></a>
 ### Development installation guide check — 2026-09-06
 
 The [development installation](../robot/install-k1.md) was exercised with the native SDK at
@@ -72,6 +79,7 @@ installation and the full workspace test suite were not rerun for this documenta
 Logs are retained in the directory above (`verification.log`, `apt-simulation.log`, and
 `relocated-library-paths.log`).
 
+<a id="重复软件检查"></a>
 ## Repeat the software checks
 
 ```sh
@@ -89,6 +97,7 @@ on the 4 GB board. Override with `K1_BUILD_JOBS` and `K1_TEST_THREADS`. If depen
 already been fetched, `CARGO_NET_OFFLINE=true` also works; the crate sources/cache can be copied
 from a development machine, but compilation and execution still happen on the K1.
 
+<a id="安装真实运行时后暴露的测试修正"></a>
 ### Runtime-present test fixes
 
 The first K1 run recorded **1,245 passed, two failed, six ignored**. Both failures were test
@@ -124,6 +133,7 @@ executable-loader checks. Its first build of the non-test dependency feature set
 took 2.99s (tests) and 2.59s (production binaries); test execution is additional to those
 build times. The complete revised script, including policy inference below, exited zero.
 
+<a id="验证真实策略推理"></a>
 ## Validate real policy inference
 
 The latest upstream checkout downloads its policies from
@@ -160,6 +170,7 @@ This is a runtime measurement, not a claimed speedup. No model quantisation or w
 were made. Finite actions are checked; output bit-equivalence with Radxa or a previous runtime
 has not been tested.
 
+<a id="k1-结果2026-09-05"></a>
 ### K1 results, 2026-09-05
 
 Bianbu 2.1.1, 4 GB board, eight CPUs available, performance governor at 1.6 GHz, no CPU
@@ -184,6 +195,7 @@ All actions were finite. The 3.2334 ms sit/stand outlier is retained, not discar
 that sample is below a 20 ms tick, but this benchmark excludes real bus and peripheral work.
 The complete CSV, including P50, is at the end of `target/k1-regression-fixed.log`.
 
+<a id="原生启动检查"></a>
 ## Native startup check
 
 The generated `robotd` was identified as an ELF64 RISC-V executable with the LP64D ABI and
@@ -210,10 +222,11 @@ or other compute workload ran concurrently. The process log is `target/k1-loop.l
 captured IPC output is `target/k1-loop-result.log`; the fixture and logs are ignored artifacts,
 not installed robot configuration or committed models.
 
+<a id="es8326-音频"></a>
 ## ES8326 audio
 
-The K1's existing ES8326 driver and mixer are used as-is. The user confirmed real
-48 kHz / S16_LE / stereo recording and playback with `hw:1,0`. The SDK profile uses
+The K1's existing ES8326 driver and mixer are used as-is. Board recording/playback checks
+used `hw:1,0` at 48 kHz / S16_LE / stereo; SDK full-duplex tests are documented below. The SDK profile uses
 the stable ALSA card ID **`sndes8326`**, not a card number that can change after boot.
 This is an opt-in board profile; the original Radxa/AIC3104 default is unchanged.
 
@@ -243,6 +256,7 @@ SDK uses `sounds ensure-bank`; a development bank can live anywhere selected by
 `audio.bank`. `audio.pet_detect = true` and a valid `audio.pet_model` explicitly
 enable the existing microphone worker; its default remains off.
 
+<a id="为什么需要-pcm-profile"></a>
 ### Why a PCM profile is needed
 
 The SDK plays 48 kHz mono S16_LE and captures 16 kHz mono S16_LE. Direct `plughw`
@@ -269,6 +283,7 @@ turning `microduck_es8326` into the invalid name `microduck_es8326,0`. Existing
 previous behaviour. The standalone `sounds` CLI already supports
 `--device microduck_es8326`; its Radxa default is intentionally not changed.
 
+<a id="重复硬件格式检查"></a>
 ### Repeat the hardware format check
 
 ```sh
@@ -288,6 +303,7 @@ The initial failed `plug` attempt and the passing explicit-emulation run are kep
 in `target/k1-es8326-duplex.log` and `target/k1-es8326-duplex-mmap-emul.log` on the
 development host. No recorded microphone audio is retained by the test script.
 
+<a id="sdk-集成与回归结果"></a>
 ### SDK integration and regression results
 
 The rebuilt native `robotd` ran with `--fake --no-policy`, an isolated IPC/runtime
@@ -328,6 +344,7 @@ with `sounds ensure-bank` (82 sounds under `/var/lib/robot/sounds`, seeded from
 this board's hardware identity). The installed audio-only config still leaves
 microphone monitoring off, and no systemd service was started or enabled.
 
+<a id="rust-ort--spacemit-视觉后端"></a>
 ## Rust ORT + SpaceMIT vision backend
 
 The opt-in EP backend is now wired through `duck-detect`, `[detect]` and `robotctl configure`
@@ -345,6 +362,7 @@ tested as three workers on 0-2 plus caller CPU 4; `taskset` alone does not enfor
 budget because the EP rebinds its caller. The integration report includes reproducible cpuset
 commands, the failed probes, and correction of the earlier standalone experiment's core labels.
 
+<a id="usb-相机单目与拼接双目"></a>
 ## USB camera: mono and packed stereo
 
 Optional hardware processing is now available through `camera.acceleration = "spacemit"`:
@@ -385,6 +403,7 @@ See [USB camera configuration, exactness, measurements and file inventory](k1-us
 Only one physical packed-stereo device was tested; the mono software path used its left ROI.
 This adds neither stereo depth/calibration nor synchronized independent USB devices.
 
+<a id="本轮软件检查之外"></a>
 ## Outside this software check
 
 - Real Dynamixel half-duplex UART, 15 servos and IMU feedback.

@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "scope": "K1 guides, entry points and contribution guide; inherited upstream references remain explicitly labelled English.",
+  "pairs": [
+    {
+      "en": "README.md",
+      "zh": "README_zh.md",
+      "shared_anchors": false
+    },
+    {
+      "en": "CONTRIBUTING.md",
+      "zh": "CONTRIBUTING_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/README.md",
+      "zh": "docs/README_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/robot/install-k1.md",
+      "zh": "docs/robot/install-k1_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/spacemit-k1.md",
+      "zh": "docs/project/spacemit-k1_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/spacemit-k1-adaptation.md",
+      "zh": "docs/project/spacemit-k1-adaptation-zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-duck-ort-ep.md",
+      "zh": "docs/project/k1-duck-ort-ep_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-duck-quantization.md",
+      "zh": "docs/project/k1-duck-quantization_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-usb-camera.md",
+      "zh": "docs/project/k1-usb-camera_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-mpp-camera.md",
+      "zh": "docs/project/k1-mpp-camera_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-imx219.md",
+      "zh": "docs/project/k1-imx219_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-rtsp.md",
+      "zh": "docs/project/k1-rtsp_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "docs/project/k1-webrtc.md",
+      "zh": "docs/project/k1-webrtc_zh.md",
+      "shared_anchors": true
+    },
+    {
+      "en": "native/k1-webrtc/README.md",
+      "zh": "native/k1-webrtc/README_zh.md",
+      "shared_anchors": true
+    }
+  ]
+}
