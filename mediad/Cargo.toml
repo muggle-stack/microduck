@@ -6,6 +6,16 @@ edition.workspace = true
 license.workspace = true
 description = "Camera, mic, WebRTC — and the remote gateway"
 
+[features]
+# The standalone RTSP preview is opt-in: ordinary SDK/Radxa builds do not gain
+# a new native RTSP-server dependency or change their existing WebRTC service.
+rtsp = ["dep:gstreamer-rtsp-server", "dep:gstreamer-rtsp"]
+
+[[bin]]
+name = "camera-rtsp"
+path = "src/bin/camera-rtsp.rs"
+required-features = ["rtsp"]
+
 # GStreamer is Linux-only here, the way `padd`'s evdev tap is. The daemon runs on the robot; the
 # route table, the session pipe and the upstream pool are portable and their tests run on a laptop.
 # Gating by target rather than by feature keeps `cargo test` honest on both — a feature that is off
@@ -60,6 +70,8 @@ gstreamer-webrtc = { version = "0.24", features = ["v1_22"] }
 # copies every frame — see `advertise_video_meta`. Typed, so the meta API type comes from the
 # bindings rather than a hand-written GType lookup.
 gstreamer-video = { version = "0.24", features = ["v1_22"] }
+gstreamer-rtsp-server = { version = "0.24", features = ["v1_22"], optional = true }
+gstreamer-rtsp = { version = "0.24", features = ["v1_22"], optional = true }
 glib = "0.21"
 # The optional K1 bridge is loaded only when explicitly selected; no MPP/OpenCV
 # build/link dependency is added to Radxa, macOS, or ordinary Linux SDK builds.

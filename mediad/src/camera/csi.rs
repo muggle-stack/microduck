@@ -86,11 +86,8 @@ fn validate_profile(bytes: &[u8], camera: &CameraParams) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn source(
-    camera: &CameraParams,
-    output: Option<Quality>,
-    rotation: Rotation,
-) -> Result<gst::Bin> {
+/// The encoder needs DMA-BUF; CPU capture keeps its existing system-memory caps.
+pub(crate) fn native_source(camera: &CameraParams, dmabuf: bool) -> Result<gst::Element> {
     camera.validate().map_err(anyhow::Error::msg)?;
     ensure!(
         camera.backend == CameraBackend::SpacemitCsi,
@@ -113,19 +110,25 @@ pub(super) fn source(
     validate_profile(&std::fs::read(path)?, camera)?;
     let location = path.to_str().context("ISP profile path must be UTF-8")?;
     ensure!(!location.contains('\0'), "invalid ISP profile path");
+    gst::ElementFactory::make("spacemitsrc")
+        .property("location", location)
+        .property("close-dmabuf", !dmabuf)
+        .build()
+        .context("missing spacemitsrc; use the matching Bianbu vendor GStreamer camera plugin")
+}
+
+pub(super) fn source(
+    camera: &CameraParams,
+    output: Option<Quality>,
+    rotation: Rotation,
+) -> Result<gst::Bin> {
     if let Some(q) = output {
         ensure!(
             q.fps() <= camera.fps,
             "media frame rate exceeds CSI capture rate"
         );
     }
-    let src = gst::ElementFactory::make("spacemitsrc")
-        .property("location", location)
-        // The existing detector maps pixels on the CPU. Advertise ordinary
-        // system-memory caps here, not a falsely end-to-end zero-copy contract.
-        .property("close-dmabuf", true)
-        .build()
-        .context("missing spacemitsrc; use the matching Bianbu vendor GStreamer camera plugin")?;
+    let src = native_source(camera, false)?;
     let input = super::usb::build(camera, output, src)?;
     let Some(direction) = rotation.video_direction() else {
         return Ok(input);

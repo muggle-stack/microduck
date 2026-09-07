@@ -266,6 +266,24 @@ The [IMX219 guide](../project/k1-imx219.md) contains the tested board/runtime, b
 and ORT/EP commands, model requirements and remaining image-quality/streaming limits.
 This is not automatic support for other CSI ports or unverified sensor modules.
 
+### Optional K1 CSI RTSP preview
+
+[`camera-rtsp`](../project/k1-rtsp.md) provides video-only IMX219 preview through the native
+SpaceMIT H.264 encoder and RTSP/TCP. It is **not** the complete WebRTC daemon, does not run
+detection, and does not currently support USB input. It listens on loopback by default and
+can be viewed through an SSH tunnel using ffplay or VLC.
+
+Review `apt-get -s install libgstrtspserver-1.0-dev` against the installed vendor GStreamer
+before installing that optional development package. Then, on the K1:
+
+```sh
+cargo k1 --locked --features mediad/rtsp --bin camera-rtsp -j 2
+```
+
+The ordinary SDK build does not enable this feature or require the native RTSP-server library.
+The private installer does not automatically install/start this tool; use the binary under
+`target/riscv64gc-unknown-linux-gnu/release/` as described in the linked guide.
+
 ## 7. Optional detector and ES8326
 
 - **Vision:** supply the verified floating-point opset 17 `duck_detect.slim.onnx` and the
