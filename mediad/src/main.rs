@@ -429,10 +429,10 @@ fn main() -> ExitCode {
 
         // The pipeline outlived its consumers, which means `webrtcsink` stopped producing them.
         tracing::warn!("no longer accepting peers");
-        if matches!(source, mediad::pipeline::Source::SpacemitCsi { .. }) {
-            if let Err(error) = mediad::pipeline::stop_k1(pipeline) {
-                tracing::error!(error = %format!("{error:#}"), "K1 media shutdown failed");
-            }
+        if matches!(source, mediad::pipeline::Source::SpacemitCsi { .. })
+            && let Err(error) = mediad::pipeline::stop_k1(pipeline)
+        {
+            tracing::error!(error = %format!("{error:#}"), "K1 media shutdown failed");
         }
         ExitCode::FAILURE
     })
