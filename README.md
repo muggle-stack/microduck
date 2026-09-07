@@ -51,10 +51,32 @@ The EP-ready model is a separate [model Release](https://github.com/muggle-stack
 download and verify it as described in those guides.
 
 For supported platforms, feature adaptation progress and planned work, see the
-[Chinese adaptation status document](docs/project/spacemit-k1-adaptation-zh.md).
+[adaptation status document](docs/project/spacemit-k1-adaptation.md).
 
 **This is not a ready-to-flash K1 robot image.** The provisioning, signed releases and OTA
 instructions below still target Radxa/aarch64; do not run them on a K1.
+
+### Native K1 build
+
+First prepare Rust and matching Bianbu development dependencies with the
+[installation guide](docs/robot/install-k1.md), then run at the repository root **on K1**:
+
+```sh
+export PATH="/opt/microduck-rust-1.89.0/bin:$PATH"
+cargo k1 --locked --bins -j 2
+```
+
+The target is `riscv64gc-unknown-linux-gnu`. This uses the board's compiler and libraries,
+not a complete Mac cross-compilation environment. `cargo board` still targets Radxa/aarch64.
+For software regression:
+
+```sh
+sh scripts/k1-test.sh
+```
+
+This does not deploy the robot or enable real servos. Cold native builds can take over an hour.
+The installation guide defines test scope, native libraries and model requirements.
+Building the source does not generate the EP-compatible model or enable acceleration.
 
 ## It does things
 

@@ -1,4 +1,7 @@
+<a id="microduck-sdk-spacemit-k1--risc-v-adaptation-status"></a>
 # Microduck SDK：SpaceMIT K1 / RISC-V 适配进度
+
+[English](spacemit-k1-adaptation.md) · [简体中文](spacemit-k1-adaptation-zh.md)
 
 更新日期：**2026-09-07**。适配仓库：[muggle-stack/microduck](https://github.com/muggle-stack/microduck)，
 当前开发入口为本 fork 的 `main`，已包含此前适配（`896b34b`）、IMX219（`ba2776c`）、
@@ -8,9 +11,10 @@ RTSP（`e73a4fa`）、WebRTC（`229c7f3`）及最新模型交付和用户验收�
 已对齐的官方基线：`bc41fb5`，此处不代表重新检查了今天的 upstream。
 
 本页统一说明当前适配平台、已验证功能和后续计划。编译安装步骤见
-[K1 开发安装指南](../robot/install-k1.md)，详细测试记录见
-[K1 板级适配记录](spacemit-k1.md)。本页汇总已有验收结果，不代表新增了一轮整机测试。
+[K1 开发安装指南](../robot/install-k1_zh.md)，详细测试记录见
+[K1 板级适配记录](spacemit-k1_zh.md)。本页汇总已有验收结果，不代表新增了一轮整机测试。
 
+<a id="1-supported-platform"></a>
 ## 1. 我们适配的平台
 
 本 fork 将原先面向 **Radxa Zero 3W / RK3566 / aarch64** 的 SDK，扩展到
@@ -29,6 +33,7 @@ RTSP（`e73a4fa`）、WebRTC（`229c7f3`）及最新模型交付和用户验收�
 这是针对上述 K1 软件栈和外设的适配，不表示任意 RISC-V 板卡、摄像头或系统镜像均已通过验证。
 Mac 上的构建和测试用于开发检查，不能替代 K1 原生执行及外设验收。
 
+<a id="2-feature-progress"></a>
 ## 2. 已经适配了多少功能
 
 沿用项目最初的 **10 类功能模块**，当前状态为：
@@ -57,8 +62,10 @@ Mac 上的构建和测试用于开发检查，不能替代 K1 原生执行及外
 `camera.view` 选择左眼或右眼即可。第 5 项的“已验证”覆盖已测 USB 单眼和指定 MUSE-Pi-Pro / CSI3
 IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推理、双目深度和标定不属于本阶段交付要求。
 
+<a id="3-measurement-evidence"></a>
 ## 3. 已完成能力的实测依据
 
+<a id="native-builds-policies-and-control-software"></a>
 ### 原生构建、策略与控制软件
 
 - SDK 已在 K1 使用 Rust 1.89 全量原生构建。开发安装复验中，12 个已安装的守护程序/诊断工具通过
@@ -68,8 +75,9 @@ IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推�
 - K1 上使用 fake IO 的控制测试持续约 30 秒，完成 1,500 个周期，约 **49.986 Hz，零 missed deadline**。
   这是真实 K1 上的模拟硬件 IO 验证，尚不能据此宣称机器人已经能在 K1 上行走。
 
-复现条件和原始记录见 [策略与控制软件验证](spacemit-k1.md#validate-real-policy-inference)。
+复现条件和原始记录见 [策略与控制软件验证](spacemit-k1_zh.md#validate-real-policy-inference)。
 
+<a id="usb-selected-eye-capture-and-detection"></a>
 ### USB 单眼与视觉检测
 
 - 摄像头采用 DECXIN 的 MJPEG 4000×1200 原始拼接帧，选取一眼、保持宽高比输出 1280×720。
@@ -86,11 +94,11 @@ IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推�
 - EP 兼容 FP32 模型 `duck_detect.slim.onnx` 已作为独立的
   [models-duck-detect-v1 预发布资产](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
   公开交付，同时提供校验值、模型说明、许可和可复现转换材料；它不是 SDK 固件或 OTA 发布。
-  普通 git clone 和开发安装不会自动获取或生成它，须按 [模型下载说明](k1-imx219.md#模型和精度边界)
+  普通 git clone 和开发安装不会自动获取或生成它，须按 [模型下载说明](k1-imx219_zh.md#模型和精度边界)
   手动下载并校验；不能直接使用原始 opset 12 ONNX、RKNN 文件或通用 COCO 模型替代。
 
-配置、模型校验值、重复测量和失败记录分别见 [Rust ORT / EP](k1-duck-ort-ep.md)、
-[USB 相机](k1-usb-camera.md) 和 [MPP / V2D / OpenCV 验收](k1-mpp-camera.md)。
+配置、模型校验值、重复测量和失败记录分别见 [Rust ORT / EP](k1-duck-ort-ep_zh.md)、
+[USB 相机](k1-usb-camera_zh.md) 和 [MPP / V2D / OpenCV 验收](k1-mpp-camera_zh.md)。
 
 ### MUSE-Pi-Pro / IMX219
 
@@ -104,8 +112,9 @@ IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推�
 2026-09-07，用户在实际使用后确认 **IMX219 稳定性和图传质量可接受**；
 据此将本板、当前场景的摄像头 / ISP 功能标为“已验证”。该反馈未附使用时长、帧统计或光照测试矩阵，
 不换算为连续若干小时无故障指标，也不替代专项压力、异常恢复和其他模组验收。
-配置、模型路径、实测条件和运行命令见 [IMX219 采集与检测](k1-imx219.md)。
+配置、模型路径、实测条件和运行命令见 [IMX219 采集与检测](k1-imx219_zh.md)。
 
+<a id="imx219--webrtc-browser-streaming"></a>
 ### IMX219 / WebRTC 浏览器图传
 
 沿用官方 `webrtcsink`、网页和 `control` DataChannel，K1 视频支路保留 NV12 DMA-BUF 给
@@ -118,15 +127,17 @@ IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推�
 后续用户已在 Mac 浏览器确认视频可用、推理正常，并确认当前 IMX219 图像质量和运行稳定性可接受。
 这是用户侧功能确认，不将其改写为带标注的检测精度或新的 4 核性能基准。
 该 vendor 编码器输出 Main Profile，缺少码率控制属性，因此显式关闭拥塞码率调整。
-详细安装方法、失败过程和验收边界见 [K1 WebRTC](k1-webrtc.md)。
+详细安装方法、失败过程和验收边界见 [K1 WebRTC](k1-webrtc_zh.md)。
 
+<a id="es8326-audio"></a>
 ### ES8326 音频
 
 已验证 SDK 的播音和麦克风采集同时工作。ALSA profile 将硬件侧固定为 48 kHz 双声道，
 适配 SDK 请求的播放/采集格式，避免全双工时硬件采样率冲突；保留原 AIC3104 默认路径。
 这不是端到端音频时延测试，也不是在新麦克风结构上完成了抚摸识别精度验证。
-详情见 [ES8326 集成记录](spacemit-k1.md#es8326-audio)。
+详情见 [ES8326 集成记录](spacemit-k1_zh.md#es8326-audio)。
 
+<a id="4-five-categories-of-remaining-work"></a>
 ## 4. 接下来继续适配的 5 类工作
 
 以下是后续范围和完成标准，不是已承诺的完成日期。可以独立推进的项目不互相等待，
@@ -134,8 +145,8 @@ IMX219 路径，不代表任意模组或系统镜像均可用。双眼同时推�
 
 1. **运动硬件闭环（模块 3）**：确认 HAT 电源/电平/半双工接口及 K1 UART，实测 1 Mbps 下
    15 个舵机与 IMU ID 200 的收发、超时和异常处理，再验证 50 Hz 真实反馈闭环及安全行为。
-2. **浏览器图传（模块 6 剩余部分）**：已有 [RTSP 预览](k1-rtsp.md) 和
-   [IMX219 WebRTC 视频 / DataChannel / 检测通知](k1-webrtc.md)。继续验收真实目标叠框、
+2. **浏览器图传（模块 6 剩余部分）**：已有 [RTSP 预览](k1-rtsp_zh.md) 和
+   [IMX219 WebRTC 视频 / DataChannel / 检测通知](k1-webrtc_zh.md)。继续验收真实目标叠框、
    音视频、USB 图传、多观众、自适应码率、端到端延迟、网络异常恢复及整机并发。
    控制通道可通信不等于真实运动硬件闭环通过。
 3. **ToF 外设（模块 7）**：确认实际型号和 I²C 连接，验证初始化、持续测距、数据发布及异常恢复。
@@ -152,18 +163,20 @@ IMX219 的当前画质和稳定性已获用户认可；后续专项回归仍需�
 覆盖不同光照下的曝光/白平衡、网络与相机异常恢复，并跟踪既有 vendor 告警。
 这些是已验证路径的扩展验收，不再将当前 IMX219 基本可用性列为阻塞项。
 
+<a id="5-what-users-can-do-now"></a>
 ## 5. 用户现在可以做什么
 
 当前 SDK 适合在 K1 上继续开发：原生编译和调试、运行策略与 fake IO 控制测试、验证 USB 单眼或指定 IMX219 采集，
 从 [模型 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
-下载并校验兼容模型后运行 ORT / EP 检测、用 [RTSP 工具](k1-rtsp.md) 或
-[WebRTC 控制台](k1-webrtc.md) 实时预览 IMX219 并接收检测通知，
+下载并校验兼容模型后运行 ORT / EP 检测、用 [RTSP 工具](k1-rtsp_zh.md) 或
+[WebRTC 控制台](k1-webrtc_zh.md) 实时预览 IMX219 并接收检测通知，
 以及使用 ES8326 录放音。当前检测与 RTSP 需分别运行，不能争用同一相机。
 
 **IMX219 浏览器图传和同源推理已可用；完整行走、自动安装和 OTA 尚未完成，仍是开发版。** 不要在 K1 上直接执行
 Radxa 专用的 `setup-board.sh`、`provision-board.sh`、`install.sh` 或安装 aarch64 发布包。
-请从 [K1 开发安装指南](../robot/install-k1.md) 开始。
+请从 [K1 开发安装指南](../robot/install-k1_zh.md) 开始。
 
+<a id="6-relationship-to-the-official-sdk"></a>
 ## 6. 与官方 SDK 的关系
 
 我们没有删除官方 RKNN 实现或改写运动控制核心，原 Rockchip 相机、AIC3104 音频等默认后端保留；

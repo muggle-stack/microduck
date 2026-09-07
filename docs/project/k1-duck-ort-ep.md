@@ -1,10 +1,16 @@
+<a id="k1-鸭子检测器rust-ort--spacemit-ep"></a>
 # K1 duck detector: Rust ORT + SpaceMIT EP
+
+[English](k1-duck-ort-ep.md) · [简体中文](k1-duck-ort-ep_zh.md)
+
+> This is dated experiment/failure evidence, not a list of entirely current blockers. See [current status](spacemit-k1-adaptation.md) and subsequent [IMX219](k1-imx219.md) / [WebRTC](k1-webrtc.md) integration. Translation does not change the original test conditions or imply new acceptance runs.
 
 The SDK can select SpaceMIT EP through its existing Rust `ort` binding. No Python process,
 new model protocol, or duplicated preprocessing/postprocessing is needed. The original RKNN
 path and CPU/two-thread ONNX default remain available. This is **opt-in**, not a provisioned
 camera service or a claim of complete K1 hardware integration.
 
+<a id="模型与原生运行时"></a>
 ## Model and native runtime
 
 Use the **floating-point opset 17** `duck_detect.slim.onnx` from the
@@ -43,6 +49,7 @@ The adapter verifies the ORT API pointer identity, then promotes that same nativ
 with `RTLD_NOW | RTLD_GLOBAL` before opening the EP. This matches the symbol visibility of the
 working C++ executable without introducing a link-time dependency or mixing Python's runtime.
 
+<a id="启用-mediad-前先离线验证"></a>
 ## Offline verification before enabling mediad
 
 Build natively, using the independent Rust 1.89 installation:
@@ -83,6 +90,7 @@ budget is equal; EP worker count is deliberately different because its caller ne
 Use distinct output/profile paths for every run. `systemd-run --scope --collect` only creates
 a transient benchmark scope, automatically reclaimed at exit; it does not install a service.
 
+<a id="ep-调用线程亲和性也计入-cpu-预算"></a>
 ### K1 EP caller affinity is part of the CPU budget
 
 With EP 2.0.6, `/proc/PID/task/TID/status` showed the caller moving from the initial
@@ -102,6 +110,7 @@ GStreamer threads share its service budget too; live video/control contention is
 The [vendor thread-option documentation](https://github.com/spacemit-com/docs-ai/blob/main/en/compute_stack/ai_compute_stack/onnxruntime.md#provider-option-reference)
 also distinguishes the EP pool from ORT's intra-op pool.
 
+<a id="守护程序与配置编辑器使用的参数"></a>
 ## Configuration consumed by the daemon and editor
 
 After offline verification, merge these entries into the existing `[detect]` section of a
@@ -128,6 +137,7 @@ the benchmark and publishes the existing `media.detections` notification unchang
 The example worker selection pairs with a 0-2,4 service CPU budget if one is imposed; these
 TOML entries alone do not impose the cgroup limit or automatically reserve the caller CPU.
 
+<a id="k1-sdk-实测2026-09-06"></a>
 ## K1 SDK measurements — 2026-09-06
 
 Rust 1.89 native release build, detector implementation at `d5b42cd`. Same 12 JPEGs for every
@@ -154,6 +164,7 @@ not accuracy-qualified model. All successful EP profiles show **one executed
 SpaceMITExecutionProvider fused node and zero CPUExecutionProvider compute nodes**. That
 proves provider execution, not which hardware instruction each internal operation used.
 
+<a id="输出一致性不是带标注精度"></a>
 ### Output agreement, not labelled accuracy
 
 - Original and slim CPU models are **byte-identical** on this four-CPU run; both give 10 boxes.
@@ -182,6 +193,7 @@ Artifacts (no model binaries added to Git):
 - `bounded-comparison.json`, `*.outputs.f32`, `*.profile_*.json`, `*.affinity.txt` and `*.log`
   contain numerical evidence. No calibration or model conversion was repeated for SDK integration.
 
+<a id="精度与剩余限制"></a>
 ## Precision and remaining limits
 
 - Keep the floating-point model as the initial EP candidate. Prior C++ measurements are in the
@@ -199,6 +211,7 @@ Artifacts (no model binaries added to Git):
 - K1 camera/ISP, WebRTC encoding, live frames and simultaneous 50 Hz hardware control still
   need integration testing. An offline detector result is not a complete-robot acceptance test.
 
+<a id="回归命令"></a>
 ## Regression commands
 
 ```sh
@@ -224,6 +237,7 @@ node and no CPU compute nodes). That short check is not substituted for the 60-r
 No benchmark processes or transient scopes remained. No robot/camera/audio service was enabled,
 no installed service config or runtime package was changed, and the original model was not replaced.
 
+<a id="此次集成的文件清单"></a>
 ## Files changed for this integration
 
 - New: `duck-detect/src/spacemit.rs`
