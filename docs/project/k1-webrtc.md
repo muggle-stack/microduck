@@ -119,8 +119,10 @@ ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 \
 ## 5. 开启检测和框
 
 先确认预览正常，再将示例的 `[detect] enabled` 改为 `true`，重启 `mediad`。
-需先提供 [IMX219 指南列出的兼容模型及 SHA256](k1-imx219.md#模型和精度边界)；
-普通 git clone 没有该模型，本次也不自动下载或公开发布权重。
+从 [models-duck-detect-v1 模型 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
+下载 `duck_detect.slim.onnx`，按 [IMX219 指南的 SHA256](k1-imx219.md#模型和精度边界) 校验，
+并调整配置中的模型绝对路径。普通 git clone 不下载 Release 资产，SDK 也不会自动获取它。
+这是带独立模型许可声明的 FP32 模型预发布，不是 SDK 固件或 INT8 实验模型。
 
 推理复用原 Rust ORT＋EP 和前后处理，结果以 `media.detections` 从同一 DataChannel 发往网页。
 框由官方网页 SVG 绘制，不烧进 H.264：下载原始视频不会自动带框。
