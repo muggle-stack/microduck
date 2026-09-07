@@ -39,3 +39,7 @@ pub mod exposure;
 /// reads the same raw branch, in the same pixel format the pipeline names.
 #[cfg(target_os = "linux")]
 pub mod detect;
+
+/// Optional, video-only K1 RTSP preview; does not start the WebRTC daemon.
+#[cfg(all(target_os = "linux", feature = "rtsp"))]
+pub mod rtsp;

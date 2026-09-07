@@ -27,7 +27,7 @@ Radxa Zero 3W / Rockchip RK3566，通过 50 Hz 控制循环和神经网络策略
 并提供相机、音频、无线控制和软件更新等能力。
 
 本仓库是 [muggle-stack/microduck](https://github.com/muggle-stack/microduck) 维护的 fork，
-在保留官方主要后端的基础上，通过 `spacemit-k1` 分支增加 **SpaceMIT K1 / RISC-V** 开发支持。
+在保留官方主要后端的基础上，已将 **SpaceMIT K1 / RISC-V** 开发支持合入本 fork 的 `main` 分支。
 策略训练由独立的 [microduck_rl](https://github.com/pollen-robotics/microduck_rl) 项目负责，
 其中包含 MuJoCo、PPO、仿真到实物迁移和 ONNX 导出；本仓库负责运行 SDK。
 
@@ -37,11 +37,15 @@ Radxa Zero 3W / Rockchip RK3566，通过 50 Hz 控制循环和神经网络策略
 进度文档区分源码接入、K1 板级验证和真实机器人验收，功能数量和剩余工作以该文档为准。
 
 当前已提供原生 Rust 构建与开发安装、策略推理验证、Rust ORT / SpaceMIT EP 视觉后端、
-USB 单眼采集及可选 MPP / V2D / OpenCV 加速，以及 ES8326 音频支持。
+USB 单眼采集及可选 MPP / V2D / OpenCV 加速、指定 MUSE-Pi-Pro / CSI3 IMX219 采集、
+RTSP 预览、WebRTC 图传与同源检测，以及 ES8326 音频支持。
 物理上是双目相机时，可以选择其中一眼使用，不要求双眼同时推理。
+EP 兼容模型已在独立的 [模型 Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1)
+提供下载与校验材料，普通 git clone 不会自动下载模型。
 
-**当前是开发适配版本，不是已完成整机验收的 K1 镜像。** 真实运动硬件、IMX219 / CSI / ISP、
-完整图传、部分外设和产品化部署仍需继续推进。原项目的演示和功能介绍不代表这些能力已经在 K1 实物上通过验收。
+**当前是开发适配版本，不是已完成整机验收的 K1 镜像。** IMX219 当前画质和稳定性已获用户确认；
+真实运动硬件、音视频与多观众图传、ToF、蓝牙/手柄及产品化部署仍需继续推进。
+原项目的演示和功能介绍不代表这些能力已经在 K1 实物上通过验收。
 
 ## 原项目演示
 
@@ -83,6 +87,8 @@ USB 单眼采集及可选 MPP / V2D / OpenCV 加速，以及 ES8326 音频支持
 | [K1 板级适配记录](docs/project/spacemit-k1.md) | 策略、控制软件、ES8326、视觉和安装的实测记录。 |
 | [Rust ORT / SpaceMIT EP](docs/project/k1-duck-ort-ep.md) | 检测模型要求、配置、CPU 预算和性能验证。 |
 | [USB 相机](docs/project/k1-usb-camera.md) / [MPP 加速](docs/project/k1-mpp-camera.md) | 原生模式、选眼配置、硬件处理和输出差异。 |
+| [IMX219 采集与检测](docs/project/k1-imx219.md) | 指定 MUSE-Pi-Pro / CSI3 的 ISP 输入、模型下载和 ORT / EP 检测。 |
+| [WebRTC 图传与检测](docs/project/k1-webrtc.md) / [RTSP 预览](docs/project/k1-rtsp.md) | 电脑浏览器同源图传/检测、私有插件构建与独立播放器预览。 |
 | [机器人命令速查](docs/robot/cheatsheet.md) | 官方 SDK 的控制、配置、音频、网络、更新和日志命令；K1 可用范围见适配进度。 |
 | [系统架构](docs/design/architecture.md) | 服务职责、总线、IPC 和更新流程。 |
 | [开发说明](CONTRIBUTING.md) / [文档索引](docs/README.md) | 构建测试约定与全部文档入口。 |

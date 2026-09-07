@@ -207,6 +207,11 @@ pub enum Source {
         camera: robotd_params::CameraParams,
         quality: robotd_params::Quality,
     },
+    /// K1 CSI/ISP through the installed vendor plugin, never the Rockchip source.
+    SpacemitCsi {
+        camera: robotd_params::CameraParams,
+        quality: robotd_params::Quality,
+    },
 }
 
 /// The head camera, and the two things it will not work without.
@@ -387,11 +392,20 @@ pub fn start(
     // capture side uses `width`/`height` from here on.
     let (out_width, out_height) = rotation.output(width, height);
     let host = settings.host.as_str();
+    let k1_csi = matches!(source, Source::SpacemitCsi { .. });
+    if let Source::SpacemitCsi { camera, .. } = &source {
+        validate_k1_webrtc(camera, settings)?;
+    }
 
     // `GST_DEBUG` has to be in the environment before `init`, which is when GStreamer parses it.
     set_gstreamer_log_threshold();
 
     gst::init().context("gstreamer would not initialise")?;
+    if k1_csi {
+        // Before loading rswebrtc: it caches the available encoders at class
+        // registration. A failed K1 encoder must not become software H.264.
+        require_spacemit_encoder()?;
+    }
 
     // And the log functions have to be swapped *after* it, which is the fix for INFO and below
     // never arriving — see [`bridge_gstreamer_log`].
@@ -423,12 +437,13 @@ pub fn start(
             src
         }
         Source::Camera(camera) => camera_source(camera, fps)?,
+        Source::SpacemitCsi { camera, .. } => crate::camera::csi::native_source(camera, true)?,
         Source::Usb { camera, quality } => {
             anyhow::ensure!(
                 (width, height, fps) == (quality.width(), quality.height(), quality.fps()),
-                "USB output quality differs from pipeline settings"
+                "camera output quality differs from pipeline settings"
             );
-            crate::camera::usb::source_with_rotation(
+            crate::camera::source_with_rotation(
                 camera,
                 Some(*quality),
                 if source_rotates {
@@ -466,12 +481,17 @@ pub fn start(
     } else {
         (width, height)
     };
+    let capture_format = if k1_csi { "NV12" } else { CAPTURE_FORMAT };
     let caps = gst::Caps::builder("video/x-raw")
-        .field("format", CAPTURE_FORMAT)
+        .field("format", capture_format)
         .field("width", capture_width as i32)
         .field("height", capture_height as i32)
-        .field("framerate", gst::Fraction::new(fps as i32, 1))
-        .build();
+        .field("framerate", gst::Fraction::new(fps as i32, 1));
+    let caps = if k1_csi {
+        caps.features(["memory:DMABuf"]).build()
+    } else {
+        caps.build()
+    };
     let capsfilter = gst::ElementFactory::make("capsfilter")
         .property("caps", &caps)
         .build()
@@ -533,15 +553,30 @@ pub fn start(
     let sink = gst::ElementFactory::make("webrtcsink")
         .build()
         .map_err(|_| {
-            anyhow!(
-                "no webrtcsink. It comes from gst-plugins-rs, which Debian packages in no suite — \
+            if k1_csi {
+                anyhow!(
+                    "no K1 webrtcsink; build scripts/build-k1-webrtc.sh and set GST_PLUGIN_PATH \
+                     as described in docs/project/k1-webrtc.md; do not run Radxa setup-gstreamer.sh"
+                )
+            } else {
+                anyhow!(
+                    "no webrtcsink. It comes from gst-plugins-rs, which Debian packages in no suite — \
              setup-gstreamer.sh installs it from the microduck-gst-plugins release, and \
              GST_PLUGIN_PATH must include /usr/local/lib/gstreamer-1.0."
-            )
+                )
+            }
         })?;
     sink.set_property("run-signalling-server", true);
     sink.set_property("signalling-server-host", host);
     sink.set_property("signalling-server-port", port);
+    if k1_csi {
+        // This first K1 path is LAN-only; don't contact the plugin's default
+        // public STUN service. ICE host candidates still carry the media.
+        sink.set_property("stun-server", Option::<String>::None);
+        tracing::warn!(
+            "K1 WebRTC uses vendor-default bitrate and H.264 Main; adaptive bitrate and baseline-only peers are not supported"
+        );
+    }
 
     // Who this robot is, handed to every peer in the signalling server's `list` answer — so a
     // client knows which robot it found before it negotiates anything. [`crate::producer`] is what
@@ -582,13 +617,22 @@ pub fn start(
     // `webrtcsink`'s discovery pass demands; the plugins release carries a patch for it from `v3`.
     // If a robot on older plugins reaches here it now fails loudly — no producer at all — rather
     // than quietly serving VP8.
-    sink.set_property("video-caps", gst::Caps::builder("video/x-h264").build());
+    let video_caps = if k1_csi {
+        gst::Caps::builder("video/x-h264")
+            .field("profile", "main")
+            .build()
+    } else {
+        gst::Caps::builder("video/x-h264").build()
+    };
+    sink.set_property("video-caps", video_caps);
 
     // The starting bitrate. `webrtcsink` moves it from here as congestion control learns the
     // link — which is the whole point of letting it own the encoder, so this is a starting
     // point rather than the setting it was when we encoded ourselves. Unless the estimator is
     // off, and then nothing moves it and this is the rate.
-    sink.set_property("start-bitrate", bitrate);
+    if !k1_csi {
+        sink.set_property("start-bitrate", bitrate);
+    }
 
     set_congestion_control(&sink, congestion_control);
 
@@ -629,7 +673,7 @@ pub fn start(
 
     let frames = Frames::default();
     let appsink = gst_app::AppSink::builder()
-        .caps(&out_caps)
+        .caps(if k1_csi { &caps } else { &out_caps })
         // `sync=false` so this branch never waits on the clock: a snapshot wants the newest frame
         // as soon as it exists, and pacing it would only add latency to a consumer that is not
         // rendering anything.
@@ -637,7 +681,15 @@ pub fn start(
         .max_buffers(1)
         .drop(true)
         .build();
-    wire_frames(&appsink, frames.clone(), out_width, out_height);
+    if k1_csi {
+        // GStreamer 1.24 videoconvert cannot negotiate DMA-BUF NV12 to ordinary
+        // UYVY. Map requested samples explicitly instead of relabelling memory.
+        appsink.set_property("async", false);
+        appsink.set_property("wait-on-eos", false);
+        wire_k1_frames(&appsink, frames.clone(), out_width, out_height);
+    } else {
+        wire_frames(&appsink, frames.clone(), out_width, out_height);
+    }
 
     if let Some(flip) = flip.as_ref() {
         pipeline
@@ -666,6 +718,7 @@ pub fn start(
         width,
         height,
         fps,
+        capture_format,
         consumers.clone(),
     )?;
 
@@ -697,9 +750,14 @@ pub fn start(
     // already saying out loud.
     watch_bus(&pipeline);
 
-    pipeline
-        .set_state(gst::State::Playing)
-        .context("the pipeline would not start")?;
+    if let Err(error) = pipeline.set_state(gst::State::Playing) {
+        if k1_csi {
+            if let Err(cleanup) = stop_k1(pipeline) {
+                tracing::error!(error = %format!("{cleanup:#}"), "K1 startup cleanup failed");
+            }
+        }
+        return Err(error).context("the pipeline would not start");
+    }
 
     tracing::info!(
         host,
@@ -716,6 +774,84 @@ pub fn start(
     Ok((pipeline, channels_rx, frames))
 }
 
+fn validate_k1_webrtc(camera: &robotd_params::CameraParams, settings: &Settings) -> Result<()> {
+    anyhow::ensure!(
+        settings.rotation == Rotation::None,
+        "K1 WebRTC requires rotation in the browser, not --flip-in-pipeline"
+    );
+    anyhow::ensure!(
+        (settings.width, settings.height, settings.fps)
+            == (camera.width, camera.height, camera.fps),
+        "K1 WebRTC requires media.quality to match the CSI profile; no implicit resizing"
+    );
+    anyhow::ensure!(
+        settings.congestion_control == robotd_params::CongestionControl::Disabled,
+        "K1's current encoder has no bitrate control; set media.congestion_control = 'disabled'"
+    );
+    Ok(())
+}
+
+fn require_spacemit_encoder() -> Result<()> {
+    let encoder = gst::ElementFactory::find("spacemith264enc")
+        .context("missing spacemith264enc; K1 WebRTC does not fall back to software encoding")?;
+    encoder.set_rank(gst::Rank::PRIMARY + 1);
+    let h264 = gst::Caps::builder("video/x-h264").build();
+    for candidate in gst::ElementFactory::factories_with_type(
+        gst::ElementFactoryType::ENCODER,
+        gst::Rank::MARGINAL,
+    ) {
+        if candidate.name() != encoder.name() && candidate.can_src_any_caps(&h264) {
+            // Only this process, which owns one K1 pipeline; no registry file
+            // or system plugin is modified. Other SDK backends never do this.
+            candidate.set_rank(gst::Rank::NONE);
+        }
+    }
+    Ok(())
+}
+
+/// K1 vendor elements need EOS before NULL. The worker owns the last pipeline
+/// reference, so a stuck native destructor cannot defeat the caller's deadline.
+/// On failure the caller must exit the process before reopening the sensor.
+pub fn stop_k1(pipeline: gst::Pipeline) -> Result<()> {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let (done, result) = mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("k1-media-stop".into())
+        .spawn(move || {
+            let stop = || -> Result<()> {
+                let (eos, received) = mpsc::sync_channel(1);
+                let bus = pipeline.bus().context("missing K1 media bus")?;
+                bus.set_sync_handler(move |_, msg| {
+                    if matches!(msg.view(), gst::MessageView::Eos(..)) {
+                        let _ = eos.try_send(());
+                    }
+                    gst::BusSyncReply::Pass
+                });
+                anyhow::ensure!(
+                    pipeline.send_event(gst::event::Eos::new()),
+                    "K1 pipeline refused EOS"
+                );
+                let drained = received.recv_timeout(Duration::from_secs(3));
+                // Still attempt NULL after an EOS failure, but never report it as
+                // clean shutdown. The outer deadline also covers set_state/drop.
+                pipeline
+                    .set_state(gst::State::Null)
+                    .context("K1 pipeline refused NULL")?;
+                drained.context("K1 pipeline EOS did not finish")?;
+                Ok(())
+            }();
+            drop(pipeline);
+            let _ = done.send(stop);
+        })
+        .context("cannot create K1 media cleanup thread")?;
+    result
+        .recv_timeout(Duration::from_secs(5))
+        .context("K1 media shutdown timed out; exit this process before reopening the camera")??;
+    tracing::info!("K1 media stopped; camera released");
+    Ok(())
+}
+
 /// Request a source pad from the tee and link it to a branch's sink pad.
 fn link_tee_branch(tee: &gst::Element, branch: &gst::Element) -> Result<()> {
     let src_pad = tee
@@ -728,6 +864,83 @@ fn link_tee_branch(tee: &gst::Element, branch: &gst::Element) -> Result<()> {
         .link(&sink_pad)
         .map_err(|e| anyhow!("linking a tee branch failed: {e:?}"))?;
     Ok(())
+}
+
+/// Explicit CPU mapping keeps DMA-BUF caps truthful while preserving the
+/// detector's BT.601 limited-range UYVY contract. Cached per appsink, never shared.
+struct K1FrameConverter {
+    input: gst_video::VideoInfo,
+    output: gst_video::VideoInfo,
+    converter: gst_video::VideoConverter,
+}
+
+impl K1FrameConverter {
+    fn new(input: gst_video::VideoInfo) -> Result<Self> {
+        anyhow::ensure!(
+            input.format() == gst_video::VideoFormat::Nv12,
+            "K1 raw sample must be NV12"
+        );
+        let output = gst_video::VideoInfo::builder(
+            gst_video::VideoFormat::Uyvy,
+            input.width(),
+            input.height(),
+        )
+        .fps(input.fps())
+        .colorimetry(&"bt601".parse()?)
+        .build()?;
+        let mut options = gst_video::VideoConverterConfig::new();
+        options.set_threads(1);
+        let converter = gst_video::VideoConverter::new(&input, &output, Some(options))?;
+        Ok(Self {
+            input,
+            output,
+            converter,
+        })
+    }
+
+    fn convert(&self, sample: &gst::Sample) -> Result<Frame> {
+        let buffer = sample.buffer().context("K1 sample has no buffer")?;
+        let input = gst_video::VideoFrameRef::from_buffer_ref_readable(buffer, &self.input)
+            .context("K1 DMA-BUF is not CPU-mappable")?;
+        let mut buffer = gst::Buffer::with_size(self.output.size())?;
+        {
+            let mut output = gst_video::VideoFrameRef::from_buffer_ref_writable(
+                buffer
+                    .get_mut()
+                    .context("new K1 output buffer is not writable")?,
+                &self.output,
+            )?;
+            self.converter.frame_ref(&input, &mut output);
+        }
+        let output = gst::Sample::builder()
+            .buffer(&buffer)
+            .caps(&self.output.to_caps()?)
+            .build();
+        crate::camera::usb::frame_from_sample(&output)
+    }
+}
+
+fn wire_k1_frames(appsink: &gst_app::AppSink, frames: Frames, width: u32, height: u32) {
+    let mut converter: Option<K1FrameConverter> = None;
+    appsink.set_callbacks(gst_app::AppSinkCallbacks::builder().new_sample(move |sink| {
+        let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+        if !frames.take_request() {
+            return Ok(gst::FlowSuccess::Ok);
+        }
+        let convert = || -> Result<Frame> {
+            let info = gst_video::VideoInfo::from_caps(sample.caps().context("K1 sample has no caps")?)?;
+            anyhow::ensure!((info.width(), info.height()) == (width, height), "unexpected K1 raw geometry");
+            if converter.as_ref().is_none_or(|c| c.input != info) {
+                converter = Some(K1FrameConverter::new(info)?);
+            }
+            converter.as_ref().context("missing K1 converter")?.convert(&sample)
+        }();
+        match convert {
+            Ok(frame) => frames.deliver(frame),
+            Err(error) => tracing::warn!(error = %format!("{error:#}"), "K1 raw frame could not be converted"),
+        }
+        Ok(gst::FlowSuccess::Ok)
+    }).build());
 }
 
 /// Answer a reader's request for a frame out of the raw branch, and drop every other buffer.
@@ -1250,6 +1463,11 @@ fn wire_encoder_setup(sink: &gst::Element) -> Result<()> {
             if !discovering {
                 tracing::info!(encoder = %name, %consumer, "hardware H.264, configured for WebRTC");
             }
+        } else if name == "spacemith264enc" {
+            if !discovering {
+                tracing::info!(encoder = %name, %consumer,
+                    "K1 hardware H.264 Main; vendor-default bitrate, no adaptive bitrate");
+            }
         } else if !discovering {
             // Only meaningful for a real consumer. During discovery this fires once per codec —
             // including `mppvp8enc` and `mpph265enc`, which are *hardware* — so warning there
@@ -1294,6 +1512,7 @@ fn meter_capture_rate(
     width: u32,
     height: u32,
     fps: u32,
+    format: &'static str,
     consumers: Consumers,
 ) -> Result<()> {
     let target = fps as f64;
@@ -1348,7 +1567,7 @@ fn meter_capture_rate(
                     target_fps: fps,
                     width,
                     height,
-                    format: CAPTURE_FORMAT.to_owned(),
+                    format: format.to_owned(),
                     frames: meter.frames,
                     dropped: meter.dropped,
                     consumers: consumers.load(std::sync::atomic::Ordering::Relaxed),
@@ -1519,6 +1738,90 @@ fn open_control_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn k1_webrtc_requires_native_geometry_and_explicit_fixed_encoder_mode() {
+        let p = robotd_params::Params::load(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../deploy/k1/webrtc-imx219.toml"
+            )),
+            true,
+        )
+        .unwrap();
+        let mut settings = Settings {
+            host: "127.0.0.1".into(),
+            port: 8443,
+            bitrate: p.media.bitrate_resolved(),
+            congestion_control: p.media.congestion_control,
+            width: p.media.quality.width(),
+            height: p.media.quality.height(),
+            fps: p.media.quality.fps(),
+            rotation: Rotation::None,
+        };
+        validate_k1_webrtc(&p.camera, &settings).unwrap();
+        settings.congestion_control = robotd_params::CongestionControl::Gcc;
+        assert!(validate_k1_webrtc(&p.camera, &settings).is_err());
+        settings.congestion_control = robotd_params::CongestionControl::Disabled;
+        settings.rotation = Rotation::Cw90;
+        assert!(validate_k1_webrtc(&p.camera, &settings).is_err());
+        settings.rotation = Rotation::None;
+        settings.width /= 2;
+        assert!(validate_k1_webrtc(&p.camera, &settings).is_err());
+    }
+
+    #[test]
+    fn k1_raw_conversion_runs_only_for_requested_frames() {
+        gst::init().unwrap();
+        for requested in [false, true] {
+            let pipeline = gst::parse::launch(
+                "videotestsrc num-buffers=3 ! video/x-raw,format=NV12,colorimetry=bt709,width=32,height=16 ! appsink name=frames sync=false async=false wait-on-eos=false"
+            ).unwrap().downcast::<gst::Pipeline>().unwrap();
+            let frames = Frames::default();
+            frames
+                .0
+                .wanted
+                .store(requested, std::sync::atomic::Ordering::Relaxed);
+            let sink = pipeline
+                .by_name("frames")
+                .unwrap()
+                .downcast::<gst_app::AppSink>()
+                .unwrap();
+            wire_k1_frames(&sink, frames.clone(), 32, 16);
+            pipeline.set_state(gst::State::Playing).unwrap();
+            let message = pipeline.bus().unwrap().timed_pop_filtered(
+                gst::ClockTime::from_seconds(3),
+                &[gst::MessageType::Eos, gst::MessageType::Error],
+            );
+            pipeline.set_state(gst::State::Null).unwrap();
+            assert!(
+                matches!(
+                    message.as_ref().map(|m| m.view()),
+                    Some(gst::MessageView::Eos(..))
+                ),
+                "{message:?}"
+            );
+            let latest = frames.0.latest.lock().unwrap();
+            assert_eq!(latest.generation, u64::from(requested));
+            if let Some(frame) = &latest.frame {
+                assert_eq!(
+                    (frame.width, frame.height, frame.format, frame.data.len()),
+                    (32, 16, "UYVY", 1024)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn k1_shutdown_drains_a_live_pipeline_before_null() {
+        gst::init().unwrap();
+        let pipeline = gst::parse::launch("videotestsrc is-live=true ! fakesink sync=false")
+            .unwrap()
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+        stop_k1(pipeline).unwrap();
+    }
 
     /// A frame whose every byte is `tag`, so a test can say *which* capture came back.
     fn frame(tag: u8) -> Frame {

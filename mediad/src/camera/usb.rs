@@ -86,7 +86,11 @@ pub fn source_with_rotation(
     Ok(bin)
 }
 
-fn build(camera: &CameraParams, output: Option<Quality>, src: gst::Element) -> Result<gst::Bin> {
+pub(super) fn build(
+    camera: &CameraParams,
+    output: Option<Quality>,
+    src: gst::Element,
+) -> Result<gst::Bin> {
     let mut input = gst::Caps::builder(if camera.input_format == CameraFormat::Mjpeg {
         "image/jpeg"
     } else {
@@ -112,7 +116,11 @@ fn build(camera: &CameraParams, output: Option<Quality>, src: gst::Element) -> R
         // before building this path; there is no automatic backend fallback.
         elements.push(element("jpegdec")?);
     }
-    elements.push(element("videoconvert")?);
+    let convert = element("videoconvert")?;
+    if camera.backend == CameraBackend::SpacemitCsi {
+        convert.set_property("n-threads", 1u32);
+    }
+    elements.push(convert);
     elements.push(filter(&raw_caps(camera.width, camera.height, camera.fps))?);
     if let Some(quality) = output {
         let r = camera.selected_region().map_err(anyhow::Error::msg)?;
@@ -267,7 +275,7 @@ impl Capture {
         rotation: Rotation,
     ) -> Result<Self> {
         gst::init()?;
-        let src = source_with_rotation(camera, output, rotation)?;
+        let src = super::source_with_rotation(camera, output, rotation)?;
         let (width, height) = output.map_or((camera.width, camera.height), |q| q.size());
         let (width, height) = rotation.output(width, height);
         Self::from_source(src, width, height)
@@ -292,7 +300,7 @@ impl Capture {
         capture
             .pipeline
             .set_state(gst::State::Playing)
-            .context("USB camera would not start")?;
+            .context("camera would not start")?;
         Ok(capture)
     }
 
@@ -301,7 +309,7 @@ impl Capture {
             for message in bus.iter_filtered(&[gst::MessageType::Error]) {
                 if let gst::MessageView::Error(error) = message.view() {
                     bail!(
-                        "USB pipeline error: {} ({:?})",
+                        "camera pipeline error: {} ({:?})",
                         error.error(),
                         error.debug()
                     );
@@ -317,12 +325,12 @@ impl Capture {
             gst::ClockTime::from_nseconds(timeout.as_nanos().min(u64::MAX as u128 - 1) as u64);
         let Some(sample) = self.sink.try_pull_sample(timeout) else {
             self.check_bus()?;
-            bail!("USB camera produced no frame before the timeout (or reached EOS)");
+            bail!("camera produced no frame before the timeout (or reached EOS)");
         };
         let image = frame_from_sample(&sample)?;
         ensure!(
             (image.width, image.height) == (self.width, self.height),
-            "USB camera negotiated unexpected dimensions"
+            "camera negotiated unexpected dimensions"
         );
         let buffer = sample.buffer().context("camera sample has no buffer")?;
         Ok(CameraFrame {
@@ -336,7 +344,7 @@ impl Capture {
 impl Drop for Capture {
     fn drop(&mut self) {
         if let Err(error) = self.pipeline.set_state(gst::State::Null) {
-            tracing::warn!(%error, "USB camera cleanup failed");
+            tracing::warn!(%error, "camera cleanup failed");
         }
     }
 }

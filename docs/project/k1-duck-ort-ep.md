@@ -8,7 +8,11 @@ camera service or a claim of complete K1 hardware integration.
 ## Model and native runtime
 
 Use the **floating-point opset 17** `duck_detect.slim.onnx` from the
-[quantization experiment](k1-duck-quantization.md) first. Its SHA-256 is
+[models-duck-detect-v1 release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1).
+This model-only prerelease includes its manifest, source graph/conversion recipe and model
+license notices; it is not an SDK/OTA release and is not downloaded by git clone.
+The [quantization experiment](k1-duck-quantization.md) records its origin and accuracy limits.
+Its SHA-256 is
 `e1e8444bc8fe9a53675f1c885b781705f8579ea17abe23bcd2b853d59c8f746f`.
 The original `duck-detect/models/duck_detect.onnx` is left untouched: EP 2.0.6 cannot compile
 its opset 12 attention reshape. A generic YOLO11 COCO model is not a substitute: this decoder

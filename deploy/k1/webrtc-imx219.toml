@@ -1,0 +1,28 @@
+# Optional MUSE-Pi-Pro / CSI3 IMX219 WebRTC preview. See docs/project/k1-webrtc.md.
+# Requires the pinned K1 rswebrtc plugin; do not use Radxa plugin binaries.
+[camera]
+backend = "spacemit_csi"
+isp_config = "/root/workspace/microduck/deploy/k1/imx219-csi3-720p.json"
+input_format = "nv12"
+width = 1280
+height = 720
+fps = 30
+rotate = 0
+
+[media]
+camera = true
+quality = "720p30"
+# The installed encoder does not expose bitrate control. The bitrate setting
+# does not control its output; vendor defaults apply. Trusted LAN bring-up only.
+congestion_control = "disabled"
+
+[detect]
+# Enable only after providing the verified model and ORT/SpaceMIT EP runtime.
+enabled = false
+model = "/root/.local/share/microduck/models/duck_detect.slim.onnx"
+onnx_provider = "spacemit"
+onnx_threads = 3
+spacemit_affinity = "0;1;2"
+spacemit_allow_fp16_epilogue = false
+hz = 2.0
+threshold = 0.35

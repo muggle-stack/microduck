@@ -39,12 +39,16 @@ recipe, and the export to ONNX that this repo loads.
 
 ### SpaceMIT K1 / RISC-V fork
 
-The `spacemit-k1` branch of [muggle-stack/microduck](https://github.com/muggle-stack/microduck)
+The `main` branch of [muggle-stack/microduck](https://github.com/muggle-stack/microduck)
 adds native K1 development support while retaining the upstream Radxa backends.
 Start with [K1 build and development installation](docs/robot/install-k1.md): isolated Rust
 1.89, Bianbu dependencies, native binaries, USB selected-eye capture, and optional SpaceMIT
 ORT/EP and MPP acceleration. [Board results and remaining work](docs/project/spacemit-k1.md)
 separate tested SDK paths from hardware still awaiting integration.
+For the tested MUSE-Pi-Pro / CSI3 IMX219, see [capture and detection](docs/project/k1-imx219.md),
+[RTSP preview](docs/project/k1-rtsp.md), and [WebRTC with same-source detection](docs/project/k1-webrtc.md).
+The EP-ready model is a separate [model Release](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1);
+download and verify it as described in those guides.
 
 For supported platforms, feature adaptation progress and planned work, see the
 [Chinese adaptation status document](docs/project/spacemit-k1-adaptation-zh.md).

@@ -1,11 +1,12 @@
 # SpaceMIT K1 / RISC-V: build and install for development
 
-This guide is for **muggle-stack/microduck, branch `spacemit-k1`**, running natively on
+This guide is for **muggle-stack/microduck, branch `main`**, running natively on
 K1/Bianbu. It installs developer binaries into a new private directory, not a complete robot
 image. It does not provision UART/CSI, install systemd units, enable motors, change networking,
 or configure signed releases/OTA. Those inherited workflows still target Radxa/aarch64.
 
-Validated environment: Bianbu **2.1.1**, Rust **1.89.0**, native GStreamer **1.24.2**,
+Validated environments: the original K1 with Bianbu **2.1.1** and MUSE-Pi-Pro with Bianbu
+**2.3.5** for IMX219; SDK Rust **1.89.0**, native GStreamer **1.24.2**,
 `spacemit-onnxruntime` **2.0.6-bpo1+1** (ORT 1.24.2+spacemit.a1, EP 2.0.6).
 The optional camera bridge uses `opencv-spacemit` **4.14.0-1bb3**. Other images/versions need
 their own checks; a successful build does not validate a different board's device tree.
@@ -20,14 +21,15 @@ For a new checkout only:
 
 ```sh
 mkdir -p "$HOME/workspace"
-git clone --branch spacemit-k1 https://github.com/muggle-stack/microduck.git \
+git clone --branch main https://github.com/muggle-stack/microduck.git \
   "$HOME/workspace/microduck"
 cd "$HOME/workspace/microduck" || exit 1
 ```
 
 For an existing checkout, enter it and inspect `git status --short --branch` first; do not
 clone over it or replace local work. This guide assumes a clean, reviewed revision of
-`spacemit-k1`. `uname -m` must report `riscv64`; the Rust target is the longer
+`main`. The older `spacemit-k1` branch does not contain the later IMX219 / RTSP / WebRTC additions.
+`uname -m` must report `riscv64`; the Rust target is the longer
 **`riscv64gc-unknown-linux-gnu`**. Running `cargo k1` on a Mac does not provide a Linux
 sysroot, linker or the board's GStreamer libraries.
 
@@ -65,8 +67,8 @@ readlink -f /usr/lib/libspacemit_ep.so
 ```
 
 The `gstreamer-webrtc-1.0` **development library is not the `webrtcsink` runtime plugin**.
-The SDK can compile and `camera-check` can run without that plugin; browser streaming still
-needs separate integration. The Rust SDK uses native `/usr/lib` ORT/EP, not Python's bundled
+The SDK can compile and `camera-check` can run without that plugin; the opt-in
+[K1 WebRTC guide](../project/k1-webrtc.md) builds it in a private directory. The Rust SDK uses native `/usr/lib` ORT/EP, not Python's bundled
 runtime. `python3-spacemit-ort` is optional for Python experiments, not a Rust runtime requirement.
 
 ## 3. Install Rust 1.89 without replacing apt Rust
@@ -166,7 +168,8 @@ K1_PROGRAMS='robotd robotctl updaterd configd btd padd mediad tofd camera-check 
     install -m 755 "$K1_BIN/$name" "$K1_SDK_PREFIX/bin/$name"
   done
   install -m 644 deploy/k1/camera-usb-mono.toml deploy/k1/camera-usb-decxin-sbs.toml \
-    deploy/k1/camera-usb-decxin-mpp.toml deploy/k1/robotd-audio.toml "$K1_SDK_PREFIX/config/"
+    deploy/k1/camera-usb-decxin-mpp.toml deploy/k1/camera-imx219.toml \
+    deploy/k1/imx219-csi3-720p.json deploy/k1/robotd-audio.toml "$K1_SDK_PREFIX/config/"
   git rev-parse HEAD > "$K1_SDK_PREFIX/REVISION"
 )
 printf 'Developer SDK: %s\n' "$K1_SDK_PREFIX"
@@ -254,12 +257,55 @@ For software capture use the reviewed `camera-usb-decxin-sbs.toml` or `camera-us
 instead; the bridge is then not loaded. MPP pixel output is not bit-identical to the software
 decoder/scaler, which is one reason acceleration stays explicit rather than default.
 
+### Optional IMX219 / K1 CSI input
+
+For a MUSE-Pi-Pro with an IMX219 on vendor CSI3 (`sensor_id=2`), the opt-in
+`camera.backend = "spacemit_csi"` uses the installed `spacemitsrc` and a vendor ISP JSON.
+It does not use the USB MPP/OpenCV bridge or Rockchip sensor controls. Before opening the camera,
+review `camera-imx219.toml` and `imx219-csi3-720p.json`; adjust the absolute `camera.isp_config`
+and model paths, especially when using the private installation above.
+The [IMX219 guide](../project/k1-imx219.md) contains the tested board/runtime, bounded capture
+and ORT/EP commands, model requirements, user image-quality/stability confirmation and
+remaining qualification limits. For browser video with same-source inference, continue with
+the [WebRTC guide](../project/k1-webrtc.md).
+This is not automatic support for other CSI ports or unverified sensor modules.
+
+### Optional K1 CSI RTSP preview
+
+[`camera-rtsp`](../project/k1-rtsp.md) provides video-only IMX219 preview through the native
+SpaceMIT H.264 encoder and RTSP/TCP. It is **not** the complete WebRTC daemon, does not run
+detection, and does not currently support USB input. It listens on loopback by default and
+can be viewed through an SSH tunnel using ffplay or VLC.
+
+Review `apt-get -s install libgstrtspserver-1.0-dev` against the installed vendor GStreamer
+before installing that optional development package. Then, on the K1:
+
+```sh
+cargo k1 --locked --features mediad/rtsp --bin camera-rtsp -j 2
+```
+
+The ordinary SDK build does not enable this feature or require the native RTSP-server library.
+The private installer does not automatically install/start this tool; use the binary under
+`target/riscv64gc-unknown-linux-gnu/release/` as described in the linked guide.
+
+### Optional IMX219 WebRTC console
+
+The [K1 WebRTC guide](../project/k1-webrtc.md) adds the pinned native `rswebrtc` / `rsrtp`
+plugins, the separate plugin-only Rust 1.92 toolchain, and `gstreamer1.0-nice` after apt review.
+The SDK itself remains on Rust 1.89. Use `deploy/k1/webrtc-imx219.toml` with `mediad` and
+the private `GST_PLUGIN_PATH` / `GST_REGISTRY`; do not replace the vendor libraries or run
+the Radxa setup script. The existing console displays video and receives detector notifications
+over the control DataChannel. Detection is opt-in and still requires the separately supplied model.
+Follow that guide's loopback/SSH instructions and LAN-only security limitations.
+
 ## 7. Optional detector and ES8326
 
 - **Vision:** supply the verified floating-point opset 17 `duck_detect.slim.onnx` and the
   explicit `[detect]` SpaceMIT settings in the [ORT/EP guide](../project/k1-duck-ort-ep.md).
-  That guide includes the model SHA-256. The EP-ready model is an experiment artifact,
-  **not yet a published K1 release asset or generated by this installation**. The original
+  That guide includes the model SHA-256. The EP-ready FP32 model is available in the separate
+  [models-duck-detect-v1 prerelease](https://github.com/muggle-stack/microduck/releases/tag/models-duck-detect-v1),
+  with source/conversion instructions and model license notices. **Download and verify it
+  separately; this installation does not generate or automatically fetch it.** The original
   opset 12 ONNX, `.rknn` file and a generic YOLO11 COCO model are not substitutes.
   No Python worker or Rust-specific duplicate preprocessing is required.
 - Merge the detection settings into a **copy of the chosen camera config**, without
@@ -289,7 +335,10 @@ now fails instead of silently selecting Rockchip defaults, including on ARM. See
 a claim of zero behavioural changes or a completed RK3566 hardware regression.
 
 Native build/tests, policy inference, ES8326 and selected-eye USB/EP checks are recorded in
-[the K1 bring-up report](../project/spacemit-k1.md). Real HAT/UART/servo/IMU feedback,
-IMX219 CSI/ISP, ToF, controller/gamepad bring-up, complete H.264/WebRTC, combined-load and
-labelled detection acceptance, and RISC-V provisioning/signed releases/OTA remain separate
-work. Installing these binaries does not make `robotctl health` a hardware acceptance test.
+[the K1 bring-up report](../project/spacemit-k1.md). The tested IMX219 image quality and running
+stability have user confirmation; single-viewer WebRTC video and same-source ORT/EP detection
+are available as described in the [current adaptation status](../project/spacemit-k1-adaptation-zh.md).
+Real HAT/UART/servo/IMU feedback, ToF, controller/gamepad bring-up, audio/video integration,
+multi-viewer streaming, quantified long-run/combined-load and labelled detection acceptance,
+and RISC-V provisioning/signed releases/OTA remain separate work. Installing these binaries
+does not make `robotctl health` a hardware acceptance test.
